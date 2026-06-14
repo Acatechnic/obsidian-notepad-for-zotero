@@ -1,0 +1,37 @@
+---
+citekey: "{{citekey}}"
+Title: "{{title}}"
+Year: "{{date | format("YYYY")}}"
+Author:
+{%- for c in creators %}
+  - "[[{{c.firstName}} {{c.lastName}}]]"
+{%- endfor %}
+Journal: "[[J. {{publicationTitle}}]]"
+Tags:
+  - Reference
+  - {{itemType}}
+Topics:
+{%- if allTags %}
+{%- for tag in allTags.split(", ") %}
+  - "[[{{tag}}]]"
+{%- endfor %}
+{%- endif %}
+ZoteroLink: "{{desktopURI}}"
+KeyIdea:
+Citation: {{bibliography}}
+Abstract:{% if abstractNote %} {{abstractNote}}{% endif %}
+---
+## Notes
+{% persist "notes" %}{% if markdownNotes %}{{markdownNotes}}{% endif %}{% endpersist %}
+## Annotations
+{% for a in annotations -%}
+{%- if a.annotatedText %}
+- p.{{a.pageLabel}} "{{a.annotatedText}}"{% if a.comment %} — {{a.comment}}{% endif %} %% ann:{{a.key}} %%
+{%- endif -%}
+{%- if a.type == "image" %}
+- p.{{a.pageLabel}} ![[References/Attachments/{{citekey}}/{{a.imageBaseName}}]]{% if a.comment %} — {{a.comment}}{% endif %} %% ann:{{a.key}} %%
+{%- endif -%}
+{%- if a.type == "text" and a.comment and not a.annotatedText %}
+- Note: {{a.comment}} p.{{a.pageLabel}} %% ann:{{a.key}} %%
+{%- endif %}
+{% endfor -%}

@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output / packaged plugin
+*.xpi
+build/
+.scaffold/
+dist/
+
+# Local dev config (Zotero binary path, profile, tokens)
+.env
+.env.local
+
+# Local-only dev data — never distribute (user library copies, personal notes,
+# vault-specific custom templates). Real samples live in test/fixtures/.
+references-copy/
+scratch-notes/
+custom-formats/
+
+# OS / editor cruft
+.DS_Store
+*.log

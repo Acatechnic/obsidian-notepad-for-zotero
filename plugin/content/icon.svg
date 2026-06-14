@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <!-- Obsidian-style faceted crystal. context-fill so Zotero themes it to match
+       the sidenav (light/dark, selected state). -->
+  <g fill="context-fill" fill-opacity="context-fill-opacity">
+    <path d="M6.05 1.45 10.7 2.7 13.25 7.55 8 14.55 3.05 10.2 2.75 4.7 Z"
+          fill-opacity="0.32"/>
+    <path d="M6.05 1.45 10.7 2.7 13.25 7.55 8 14.55 3.05 10.2 2.75 4.7 Z
+             M6.05 1.45 7.35 6.65 2.75 4.7 M10.7 2.7 7.35 6.65 13.25 7.55
+             M7.35 6.65 8 14.55 M7.35 6.65 3.05 10.2"
+          fill="none" stroke="context-fill" stroke-width="1.05"
+          stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+</svg>

@@ -1,0 +1,67 @@
+<vbox xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+      xmlns:html="http://www.w3.org/1999/xhtml">
+  <groupbox>
+    <label><html:h2>Obsidian Notes</html:h2></label>
+    <html:div style="display:flex;flex-direction:column;gap:12px;padding:6px 4px;max-width:780px;">
+      <html:label style="display:flex;flex-direction:column;gap:3px;">
+        <html:span>Obsidian vault path</html:span>
+        <html:input type="text" style="width:100%;box-sizing:border-box;"
+          preference="extensions.zotero-obsidian-notes.vaultPath"/>
+        <html:span style="color:#888;font-size:11px;">Absolute path to your vault. Used for the “Open in Obsidian” link.</html:span>
+      </html:label>
+
+      <html:label style="display:flex;flex-direction:column;gap:3px;">
+        <html:span>Notes folder</html:span>
+        <html:input type="text" style="width:100%;box-sizing:border-box;"
+          preference="extensions.zotero-obsidian-notes.notesDir"/>
+        <html:span style="color:#888;font-size:11px;">Folder (inside the vault) where literature notes live and are created.</html:span>
+      </html:label>
+
+      <html:label style="display:flex;flex-direction:column;gap:3px;">
+        <html:span>Templates folder</html:span>
+        <html:input type="text" style="width:100%;box-sizing:border-box;"
+          preference="extensions.zotero-obsidian-notes.templatesDir"/>
+        <html:span style="color:#888;font-size:11px;">Folder of templates. <html:b>note.md</html:b> (and any <html:b>note-*</html:b>) are whole-note scaffolds; every other file is an insertable block template (shown in the Template dropdown by filename). See TEMPLATES.md in this folder for how to write one.</html:span>
+      </html:label>
+
+      <html:label style="display:flex;flex-direction:column;gap:3px;">
+        <html:span>Default note template</html:span>
+        <html:input type="text" style="width:100%;box-sizing:border-box;"
+          preference="extensions.zotero-obsidian-notes.defaultNoteTemplate"/>
+        <html:span style="color:#888;font-size:11px;">Filename (without .md) of the scaffold used by “Create note from template”. Default: note. If you keep several note-* scaffolds, the create panel lets you pick a different one per note.</html:span>
+      </html:label>
+
+      <html:label style="display:flex;flex-direction:column;gap:3px;">
+        <html:span>Filename pattern</html:span>
+        <html:input type="text" style="width:100%;box-sizing:border-box;"
+          preference="extensions.zotero-obsidian-notes.filenamePattern"/>
+        <html:span style="color:#888;font-size:11px;">New-note filename. Use {{citekey}} — e.g. @{{citekey}}.md</html:span>
+      </html:label>
+
+      <html:label style="display:flex;align-items:flex-start;gap:8px;">
+        <html:input type="checkbox" preference="extensions.zotero-obsidian-notes.autoSync"/>
+        <html:span style="display:flex;flex-direction:column;gap:3px;">
+          <html:span>Auto-sync annotations while reading</html:span>
+          <html:span style="color:#888;font-size:11px;">When on, an open note's live annotation blocks refresh automatically as you highlight in the PDF — no need to click Refresh. Only notes you have open are touched, and your prose is never changed. Also toggleable from the note pane toolbar.</html:span>
+        </html:span>
+      </html:label>
+
+      <html:hr style="border:none;border-top:1px solid #ddd;margin:4px 0;"/>
+      <html:span style="color:#888;font-size:11px;">Legacy fallbacks (used only if the Templates folder is unset or missing the relevant file):</html:span>
+
+      <html:label style="display:flex;flex-direction:column;gap:3px;">
+        <html:span>Note template file (legacy)</html:span>
+        <html:input type="text" style="width:100%;box-sizing:border-box;"
+          preference="extensions.zotero-obsidian-notes.templatePath"/>
+        <html:span style="color:#888;font-size:11px;">Fallback whole-note template, used if the Templates folder has no note.md.</html:span>
+      </html:label>
+
+      <html:label style="display:flex;flex-direction:column;gap:3px;">
+        <html:span>Custom formats folder (legacy)</html:span>
+        <html:input type="text" style="width:100%;box-sizing:border-box;"
+          preference="extensions.zotero-obsidian-notes.formatsDir"/>
+        <html:span style="color:#888;font-size:11px;">Optional older folder of block templates; merged in, but the Templates folder wins on name clashes.</html:span>
+      </html:label>
+    </html:div>
+  </groupbox>
+</vbox>
