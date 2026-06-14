@@ -14,7 +14,7 @@
 // (provider-independent — no Better BibTeX dependency).
 
 var ZON = {
-  pluginID: "obsidian-notepad-for-zotero@local",
+  pluginID: "__addonID__", // replaced at build time by scaffold (config.addonID)
   rootURI: null,
   index: null,       // Map<itemKey, filePath>
   indexing: null,    // in-flight index promise
