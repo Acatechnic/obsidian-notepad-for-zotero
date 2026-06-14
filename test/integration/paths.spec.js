@@ -15,7 +15,8 @@ describe("ZONCore helpers (in Zotero runtime)", function () {
 
   it("exposes the path + safety helpers", function () {
     ["vaultRelative", "vaultName", "buildObsidianUri", "sanitizeFilename",
-     "isUnder", "parseObsidianVaults", "obsidianConfigPath", "syncBlocks"]
+     "isUnder", "parseObsidianVaults", "obsidianConfigPath", "syncBlocks",
+     "applyManifest", "setManifestEntry", "buildManifestFromScaffold"]
       .forEach((k) => assert.isFunction(C[k], k + " should be a function"));
   });
 
@@ -39,5 +40,14 @@ describe("ZONCore helpers (in Zotero runtime)", function () {
     const a = C.syncBlocks(md, [], { citekey: "x" });
     const b = C.syncBlocks(a, [], { citekey: "x" });
     assert.equal(a, b, "syncBlocks should be idempotent");
+  });
+
+  it("applies a frontmatter manifest idempotently through the bundle", function () {
+    let md = "---\nTitle: \"old\"\n---\nbody\n";
+    md = C.setManifestEntry(md, "Title", "\"{{title}}\"");
+    const a = C.applyManifest(md, { title: "Fresh Title" });
+    const b = C.applyManifest(a, { title: "Fresh Title" });
+    assert.include(a, 'Title: "Fresh Title"', "manifest should refresh the key");
+    assert.equal(a, b, "applyManifest should be idempotent");
   });
 });
