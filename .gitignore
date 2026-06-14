@@ -6,6 +6,11 @@ node_modules/
 build/
 .scaffold/
 dist/
+# esbuild-generated bundles (built into the dist by zotero-plugin build)
+addon/content/*.bundle.js
+
+# scaffold-generated Fluent id typings
+typings/
 
 # Local dev config (Zotero binary path, profile, tokens)
 .env

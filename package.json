@@ -4,7 +4,24 @@
   "description": "Open and edit each item's Obsidian vault markdown note directly in the Zotero item pane, and sync your PDF highlights into it.",
   "license": "AGPL-3.0-or-later",
   "type": "module",
+  "author": "Obsidian Notepad for Zotero contributors",
+  "homepage": "https://github.com/OWNER/obsidian-notepad-for-zotero",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OWNER/obsidian-notepad-for-zotero.git"
+  },
+  "config": {
+    "addonName": "Obsidian Notepad for Zotero",
+    "addonID": "obsidian-notepad-for-zotero@local",
+    "addonRef": "obsidian-notepad",
+    "addonInstance": "ZON",
+    "prefsPrefix": "extensions.zotero-obsidian-notes"
+  },
   "scripts": {
+    "start": "zotero-plugin serve",
+    "build": "zotero-plugin build",
+    "release": "zotero-plugin release",
+    "test:zotero": "zotero-plugin test",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -21,6 +38,7 @@
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.43.1",
     "esbuild": "^0.28.1",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "zotero-plugin-scaffold": "^0.8.6"
   }
 }
