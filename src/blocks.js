@@ -21,6 +21,9 @@ import { pdfLink } from "./annotations.js";
 
 const OPEN_RE = /^\s*%%\s*zon\s+([^%]*?)\s*%%\s*$/;
 const CLOSE_RE = /^\s*%%\s*\/zon\s*%%\s*$/;
+const ANN_ANCHOR = /%%\s*ann:([A-Za-z0-9]+)\s*%%/;
+
+function annAnchor(key) { return `%% ann:${key} %%`; }
 
 export function parseConfig(str) {
   const cfg = {};
@@ -91,8 +94,30 @@ function matchesFilter(a, cfg) {
   return true;
 }
 
+// Render the matching annotations of a block into anchored items, in Zotero
+// sort order. Each item is { key, text }, where text is the format's rendered
+// markdown for that annotation followed by an invisible `%% ann:KEY %%` anchor.
+// The anchor is what lets a later sync preserve manual in-block edits (A2): the
+// merge keys on it, so user text attached to an annotation survives regeneration.
+function renderAnnotationItems(config, annotations, opts = {}) {
+  const formats = opts.formats || DEFAULT_FORMATS;
+  const env = opts.env || makeEnv();
+  const fmt = formats[config.format] || formats[DEFAULT_FORMAT_NAME];
+  const anns = (annotations || [])
+    .filter((a) => matchesFilter(a, config))
+    .sort((x, y) => {
+      const sx = String(x.sortIndex ?? ""), sy = String(y.sortIndex ?? "");
+      if (sx !== sy) return sx < sy ? -1 : 1;
+      return String(x.key).localeCompare(String(y.key));
+    });
+  return anns.map((a) => {
+    const rendered = env.renderString(fmt.item, annotationContext(a, opts)).replace(/\s+$/, "");
+    return { key: a.key, text: `${rendered} ${annAnchor(a.key)}` };
+  });
+}
+
 // Render the body of one block. Dispatches on `kind`:
-//  - "annotations" (default): one rendered item per matching annotation.
+//  - "annotations" (default): one rendered (anchored) item per matching annotation.
 //  - "field" | "section" | "custom": the named template rendered ONCE over the
 //    item's data (opts.itemData from buildItemData) — e.g. a "year" or "abstract"
 //    element that refreshes from Zotero like an annotation block does.
@@ -110,15 +135,58 @@ export function renderBlockBody(config, annotations, opts = {}) {
   }
 
   const fmt = formats[config.format] || formats[DEFAULT_FORMAT_NAME];
-  const anns = (annotations || [])
-    .filter((a) => matchesFilter(a, config))
-    .sort((x, y) => {
-      const sx = String(x.sortIndex ?? ""), sy = String(y.sortIndex ?? "");
-      if (sx !== sy) return sx < sy ? -1 : 1;
-      return String(x.key).localeCompare(String(y.key));
-    });
-  const items = anns.map((a) => env.renderString(fmt.item, annotationContext(a, opts)).replace(/\s+$/, ""));
-  return items.join(fmt.sep || "\n");
+  const items = renderAnnotationItems(config, annotations, { ...opts, env, formats });
+  return items.map((i) => i.text).join(fmt.sep || "\n");
+}
+
+// Split an existing block body into keyed annotation items by their
+// `%% ann:KEY %%` anchors, plus any trailing user text after the last anchor.
+// A block runs up to and INCLUDING its anchor line, so user text typed between
+// two anchors rides along with the following annotation, and is preserved with
+// it on merge. If the body has no anchors at all (a pre-A2 block, or hand-typed
+// prose), `hadAnchors` is false and the caller discards it for a clean re-render.
+function parseAnchoredItems(body) {
+  const lines = String(body).split("\n");
+  const blocks = [];
+  let buf = [];
+  let seen = false;
+  for (const line of lines) {
+    buf.push(line);
+    const m = line.match(ANN_ANCHOR);
+    if (m) {
+      while (buf.length && buf[0].trim() === "") buf.shift();
+      blocks.push({ key: m[1], text: buf.join("\n").replace(/\s+$/, "") });
+      buf = [];
+      seen = true;
+    }
+  }
+  const tail = buf.join("\n").trim();
+  return { blocks, tail: seen ? tail : "", hadAnchors: seen };
+}
+
+// Merge freshly-rendered anchored items into the existing block body: for every
+// annotation key still present in Zotero, keep the EXISTING text (so manual
+// edits inside the block survive); insert new annotations in Zotero order; drop
+// annotations no longer in Zotero. Trailing user text after the last anchor is
+// preserved. Idempotent: merge(render, render) === render. (A2)
+function mergeAnnotationItems(existingBody, freshItems, sep) {
+  const existing = parseAnchoredItems(existingBody);
+  const byKey = new Map(existing.blocks.map((b) => [b.key, b]));
+  const merged = freshItems.map((f) => (byKey.has(f.key) ? byKey.get(f.key).text : f.text));
+  let out = merged.join(sep);
+  if (existing.tail) out += sep + existing.tail;
+  return out;
+}
+
+// Regenerate one block's body from current annotations. Annotation blocks merge
+// (preserving in-block edits); field/section/custom blocks render fresh.
+function regenerateBlock(seg, annotations, opts) {
+  const kind = seg.config.kind || "annotations";
+  if (kind !== "annotations") return renderBlockBody(seg.config, annotations, opts);
+  const formats = opts.formats || DEFAULT_FORMATS;
+  const fmt = formats[seg.config.format] || formats[DEFAULT_FORMAT_NAME];
+  const fresh = renderAnnotationItems(seg.config, annotations, opts);
+  return mergeAnnotationItems(seg.body, fresh, fmt.sep || "\n");
 }
 
 // Regenerate every sync!=off block from the current annotations; leave all
@@ -130,7 +198,7 @@ export function syncBlocks(md, annotations, opts = {}) {
     if (s.type === "text") return s.text;
     const body = s.config.sync === "off"
       ? s.body
-      : renderBlockBody(s.config, annotations, { ...opts, env });
+      : regenerateBlock(s, annotations, { ...opts, env });
     return `${s.openRaw}\n${body}\n${s.closeRaw}`;
   });
   return out.join("\n");

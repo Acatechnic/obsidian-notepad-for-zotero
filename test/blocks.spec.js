@@ -93,6 +93,66 @@ My free-written thoughts — keep these.
   });
 });
 
+describe("A2 — preserve manual edits inside sync=on blocks", () => {
+  // A fresh sync now anchors each annotation with %% ann:KEY %%.
+  it("anchors each rendered annotation so it can be tracked", () => {
+    const body = renderBlockBody({ colour: "all", format: "list" }, ANNS, {});
+    expect(body).toContain("%% ann:A %%");
+    expect(body).toContain("%% ann:B %%");
+    expect(body).toContain("%% ann:C %%");
+  });
+
+  const noteWith = (block) => `---
+citekey: "x"
+---
+
+%% zon kind=annotations colour=all sync=on format=list %%
+${block}
+%% /zon %%
+`;
+
+  it("preserves user text appended after an annotation's anchor across a sync", () => {
+    const first = syncBlocks(noteWith(""), ANNS, {});
+    // User edits inside the block: add a note line after annotation B's anchor.
+    const edited = first.replace(
+      /(%% ann:B %%)/,
+      "$1\n  - my own follow-up thought on this point"
+    );
+    const resynced = syncBlocks(edited, ANNS, {});
+    expect(resynced).toContain("my own follow-up thought on this point");
+    // All three annotations still present, single block.
+    expect(resynced).toContain("yellow point");
+    expect(resynced).toContain("red point");
+    expect(resynced.match(/%% zon /g).length).toBe(1);
+  });
+
+  it("is idempotent once anchored, even with a manual edit present", () => {
+    const first = syncBlocks(noteWith(""), ANNS, {});
+    const edited = first.replace(/(%% ann:A %%)/, "$1\n  - note on A");
+    const once = syncBlocks(edited, ANNS, {});
+    const twice = syncBlocks(once, ANNS, {});
+    expect(twice).toBe(once);
+  });
+
+  it("drops an annotation removed from Zotero but keeps surviving edits", () => {
+    const first = syncBlocks(noteWith(""), ANNS, {});
+    const edited = first.replace(/(%% ann:A %%)/, "$1\n  - note on A");
+    const fewer = syncBlocks(edited, ANNS.filter((a) => a.key !== "C"), {});
+    expect(fewer).toContain("note on A");        // edit on a surviving annotation kept
+    expect(fewer).toContain("yellow point");     // A kept
+    expect(fewer).not.toContain("another yellow"); // C gone
+  });
+
+  it("cleanly re-renders a pre-A2 (anchorless) block on first sync", () => {
+    // A block authored before A2: rendered items with NO %% ann %% anchors.
+    const legacyBody = `- [p.3](zotero://open-pdf/library/items/PDF?page=3) "yellow point"`;
+    const out = syncBlocks(noteWith(legacyBody), ANNS, {});
+    expect(out).toContain("%% ann:A %%"); // now anchored
+    // No duplication of the old anchorless line.
+    expect(out.match(/yellow point/g).length).toBe(1);
+  });
+});
+
 describe("custom (user-supplied) formats", () => {
   it("renders a block with a user-defined Nunjucks format", () => {
     const myFormats = {

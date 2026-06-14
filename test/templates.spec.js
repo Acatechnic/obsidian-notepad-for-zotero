@@ -42,6 +42,6 @@ describe("parseTemplateFile", () => {
     const out = renderBlockBody({ colour: "yellow", format: "t" }, anns, {
       formats: { t: { item: t.item, sep: t.sep } },
     });
-    expect(out).toBe(`- "hello" (p.3)`); // only the yellow one
+    expect(out).toBe(`- "hello" (p.3) %% ann:K1 %%`); // only the yellow one, anchored (A2)
   });
 });
