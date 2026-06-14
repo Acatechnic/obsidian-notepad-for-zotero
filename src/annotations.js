@@ -24,8 +24,16 @@ function esc(s) {
 }
 
 function pdfLink(a) {
-  const page = a.pageIndex === undefined || a.pageIndex === null ? "" : a.pageIndex;
-  return `zotero://open-pdf/library/items/${a.attachmentKey}?page=${page}`;
+  // Zotero's open-pdf `?page=` is the DISPLAYED page number (the label), not the
+  // 0-based index — passing the index lands one page early. Prefer the label;
+  // fall back to pageIndex+1. Also append `&annotation=<key>` so Zotero jumps to
+  // the exact annotation regardless of any page-label quirks.
+  let page = "";
+  if (a.pageLabel != null && String(a.pageLabel).trim() !== "") page = String(a.pageLabel).trim();
+  else if (a.pageIndex != null) page = a.pageIndex + 1;
+  let url = `zotero://open-pdf/library/items/${a.attachmentKey}?page=${encodeURIComponent(page)}`;
+  if (a.key) url += `&annotation=${a.key}`;
+  return url;
 }
 
 function anchor(a) {

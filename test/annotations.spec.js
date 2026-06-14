@@ -29,9 +29,17 @@ const countAnchors = (md) => (md.match(/%% ann:[A-Za-z0-9]+ %%/g) || []).length;
 describe("annotation rendering (user's real format)", () => {
   it("renders a highlight as a page-linked quote with hidden key anchor", () => {
     const line = renderAnnotationLine(ANNS[0], { citekey: "aitken2021" });
+    // page = the LABEL ("1"), not the 0-based index, + the annotation key so
+    // Zotero jumps to the exact annotation (fixes the off-by-one page open).
     expect(line).toBe(
-      '- [p.1](zotero://open-pdf/library/items/MFZCGEC3?page=0) "counter-democracy and depoliticisation." %% ann:HXQBPCWS %%'
+      '- [p.1](zotero://open-pdf/library/items/MFZCGEC3?page=1&annotation=HXQBPCWS) "counter-democracy and depoliticisation." %% ann:HXQBPCWS %%'
     );
+  });
+
+  it("falls back to pageIndex+1 in the link when there is no page label", () => {
+    const line = renderAnnotationLine(
+      { key: "K", type: "highlight", attachmentKey: "ATT", pageLabel: "", pageIndex: 4, annotatedText: "x" }, {});
+    expect(line).toContain("?page=5&annotation=K");
   });
 
   it("renders a highlight-with-comment using the em-dash italic form", () => {

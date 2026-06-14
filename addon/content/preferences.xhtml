@@ -35,9 +35,9 @@
 
       <html:label style="display:flex;flex-direction:column;gap:3px;">
         <html:span>Default note template</html:span>
-        <html:input type="text" style="width:100%;box-sizing:border-box;"
-          preference="extensions.zotero-obsidian-notes.defaultNoteTemplate"/>
-        <html:span style="color:#888;font-size:11px;">Filename (without .md) of the scaffold used by “Create note from template”. Default: note. If you keep several note-* scaffolds, the create panel lets you pick a different one per note.</html:span>
+        <html:select id="zon-default-note" style="width:100%;box-sizing:border-box;"
+          preference="extensions.zotero-obsidian-notes.defaultNoteTemplate"></html:select>
+        <html:span style="color:#888;font-size:11px;">The scaffold used by “Create note from template”. Lists <html:b>note.md</html:b> and any <html:b>note-*.md</html:b> in your Templates folder.</html:span>
       </html:label>
 
       <html:label style="display:flex;flex-direction:column;gap:3px;">
