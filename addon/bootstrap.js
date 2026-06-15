@@ -663,6 +663,13 @@ var ZON = {
     let go = function () {
       if (self._lastPaintItemID !== itemID) return; // user moved to another item while retrying
       let sections = self.connectedSections();
+      // Zotero's <collapsible-section> shows its `label` ATTRIBUTE as the head
+      // title. Fluent won't apply our zon-header `.label` to a plugin section
+      // (the attribute isn't whitelisted), so the header was blank — set it
+      // ourselves on every connected copy (idempotent). (bug 5)
+      for (let cs of sections) {
+        try { if (cs.getAttribute("label") !== "Obsidian Note") cs.setAttribute("label", "Obsidian Note"); } catch (e) {}
+      }
       let win = (sections[0] && sections[0].ownerDocument.defaultView) || Zotero.getMainWindows()[0];
       // Prefer the active tab's section; fall back to the viewport-visible one,
       // then (after waiting for layout) the first connected.
