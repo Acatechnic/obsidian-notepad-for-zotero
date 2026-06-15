@@ -1145,13 +1145,22 @@ var ZON = {
       if (p && p.nodeType === 11) p = p.host; // cross shadow boundary
       n = p;
     }
-    let minEl = null, ancMin = Infinity;
+    // Collect EVERY pane-level ancestor up to (and including) <item-pane> as resize
+    // observe targets. When the sidebar is dragged NARROWER, the INNER panes
+    // (zotero-view-item, the deck) get held open by our pinned-wide content, so they
+    // don't shrink and a ResizeObserver on them never fires — that was the bug
+    // (expanding re-wrapped, narrowing didn't, content spilled behind the sidenav).
+    // <item-pane> is bounded by the splitter and the sidenav, so it shrinks on
+    // narrow regardless of our content; observing the whole chain makes the re-fit
+    // fire BOTH ways.
+    let observeEls = [];
     for (let i = 0; i < 12 && n; i++) {
-      let cw = n.clientWidth || 0;
-      if (cw > 100 && cw < ancMin) { ancMin = cw; minEl = n; }
+      if ((n.clientWidth || 0) > 100) observeEls.push(n);
+      let stop = (n.nodeName || "").toLowerCase() === "item-pane";
       let p = n.parentNode;
       if (p && p.nodeType === 11) p = p.host; // cross shadow boundary
       n = p;
+      if (stop) break;
     }
     // Safety net: never pin wider than the room from the host's left edge to the
     // window's right edge — a hard guard against any residual inflated ancestor.
@@ -1167,12 +1176,16 @@ var ZON = {
       // clipped row).
       try { if (rec.wrap) { rec.wrap.style.width = min + "px"; rec.wrap.style.maxWidth = min + "px"; } } catch (e) {}
     }
-    if (minEl && win.ResizeObserver && rec._fitObservedEl !== minEl) {
+    // (Re)attach the observer only when the chain's anchor changes (different item /
+    // re-render), NOT every fit — re-observing each fit would re-fire the observer's
+    // initial callback and loop. Same anchor → keep the existing observer.
+    if (win.ResizeObserver && observeEls.length && rec._fitObservedEl !== observeEls[0]) {
       try { if (rec._fitRO) rec._fitRO.disconnect(); } catch (e) {}
       rec._fitRO = new win.ResizeObserver(() => {
         try { this.fitHost(rec); if (rec.lib && rec.view) rec.lib.refresh(rec.view); } catch (e) {}
       });
-      try { rec._fitRO.observe(minEl); rec._fitObservedEl = minEl; } catch (e) {}
+      for (let el of observeEls) { try { rec._fitRO.observe(el); } catch (e) {} }
+      rec._fitObservedEl = observeEls[0];
     }
   },
 
