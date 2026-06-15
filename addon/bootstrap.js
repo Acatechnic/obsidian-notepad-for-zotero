@@ -90,6 +90,7 @@ var ZON = {
     for (let win of Zotero.getMainWindows()) {
       try {
         this.removeWraps(win);
+        try { this.removeItemMenu(win); } catch (e) {}
         try { if (win._zonThemeMO) win._zonThemeMO.disconnect(); win._zonThemeMO = null; } catch (e) {}
         try { if (win._zonThemeMQ && win._zonThemeMQH) win._zonThemeMQ.removeEventListener("change", win._zonThemeMQH); } catch (e) {}
         for (let id of ["zon-editor-lib", "zon-core-lib", "zon-toolbar-css"]) {
@@ -136,6 +137,7 @@ var ZON = {
     // mountEditor).
     this.injectCore(win).catch((e) => this.log("core inject failed: " + e));
     this.watchTheme(win);
+    try { this.addItemMenu(win); } catch (e) { this.log("addItemMenu failed: " + e); }
   },
 
   // Re-theme live editors when Zotero's light/dark scheme changes. Each editor is
@@ -239,6 +241,16 @@ var ZON = {
     "msg.noCitekey": "Couldn't determine a citekey for this item — set one in Better BibTeX or the Extra field.",
     "msg.outsideNotes": "Refusing to create a note outside your notes folder.",
     "msg.createFailed": "Create failed: ",
+    "menu.title": "Obsidian Notepad",
+    "menu.createNote": "Create Obsidian note",
+    "menu.createNotesN": "Create {count} Obsidian notes",
+    "menu.creatingTitle": "Creating Obsidian notes…",
+    "menu.createdSummary": "Notes — created {created}, already existed {existed}, skipped {skipped}, failed {failed}.",
+    "menu.findDOI": "Find DOI (Crossref)",
+    "menu.findDOIN": "Find DOIs for {count} items (Crossref)",
+    "doi.searching": "Searching Crossref for DOIs…",
+    "doi.noneMissing": "All selected items already have a DOI.",
+    "doi.summary": "DOIs — found {found}, no confident match {none}, failed {failed}.",
   },
 
   // Look up a string by key, interpolating {name} placeholders from `args`.
@@ -1493,18 +1505,19 @@ var ZON = {
     return { kind: "annotations", colour, sync, format: name };
   },
 
-  // Create @<citekey>.md from the chosen template (any template — a whole-note
-  // scaffold or just an annotations block), link it to this item, and open it.
-  async createNote(rec, templateName) {
-    let item = rec.item;
-    if (!item) return;
-    let win = rec.host.ownerDocument.defaultView;
-    let setMsg = (m) => { try { rec.bannerText.textContent = m; } catch (e) {} };
+  // Write @<citekey>.md for `item` from `templateName` (or the default note
+  // scaffold), inject a durable ZoteroLink, and index it — IF it doesn't already
+  // exist. Free of any item-pane `rec`, so the single-item button (createNote) and
+  // the bulk context-menu (bulkCreateNotes) share exactly one creation path.
+  // Returns { status, path?, error? } where status is one of:
+  //   "created" | "exists" | "no-citekey" | "outside" | "no-item" | "error".
+  async writeNoteForItem(win, item, templateName) {
+    if (!item) return { status: "no-item" };
     try {
       if (!win.ZONCore) await this.injectCore(win);
       await this.loadTemplates();
       let citekey = this.getCitekey(item);
-      if (!citekey) { setMsg(this.t("msg.noCitekey")); return; }
+      if (!citekey) return { status: "no-citekey" };
       // Sanitise the citekey (it can come from Better BibTeX / the Extra field)
       // before it becomes a filename — strip separators / illegal chars.
       citekey = win.ZONCore.sanitizeFilename(citekey);
@@ -1515,7 +1528,7 @@ var ZON = {
       let dir = this.notesDir();
       let path = PathUtils.join(dir, filename);
       // Defence-in-depth: never write outside the configured notes folder.
-      if (!win.ZONCore.isUnder(path, dir)) { setMsg(this.t("msg.outsideNotes")); return; }
+      if (!win.ZONCore.isUnder(path, dir)) return { status: "outside", path };
       if (!(await IOUtils.exists(path))) {
         let md = await this.renderTemplateAsNote(win, item, templateName);
         // Guarantee a durable item-key link so the note resolves even if the
@@ -1524,16 +1537,222 @@ var ZON = {
         await IOUtils.makeDirectory(PathUtils.parent(path), { createAncestors: true });
         await this.safeWrite(path, md);
         this.log("created note " + path);
-      } else {
-        this.log("note already exists, linking: " + path);
+        if (this.index) this.index.set(item.key, path);
+        return { status: "created", path };
       }
+      this.log("note already exists, linking: " + path);
       if (this.index) this.index.set(item.key, path);
-      await this.renderInto(rec.wrap, item);
+      return { status: "exists", path };
     } catch (e) {
-      this.log("createNote failed: " + e);
-      setMsg(this.t("msg.createFailed") + e);
+      this.log("writeNoteForItem failed: " + e);
+      return { status: "error", error: String(e) };
     }
   },
+
+  // Create @<citekey>.md from the chosen template (any template — a whole-note
+  // scaffold or just an annotations block), link it to this item, and open it.
+  async createNote(rec, templateName) {
+    let item = rec.item;
+    if (!item) return;
+    let win = rec.host.ownerDocument.defaultView;
+    let setMsg = (m) => { try { rec.bannerText.textContent = m; } catch (e) {} };
+    let r = await this.writeNoteForItem(win, item, templateName);
+    if (r.status === "no-citekey") { setMsg(this.t("msg.noCitekey")); return; }
+    if (r.status === "outside") { setMsg(this.t("msg.outsideNotes")); return; }
+    if (r.status === "error") { setMsg(this.t("msg.createFailed") + r.error); return; }
+    try { await this.renderInto(rec.wrap, item); } catch (e) {}
+  },
+
+  // ---------------------------------------------------------- item context menu
+
+  // Zotero's center-pane item-list context menu. The id has shifted across
+  // versions, so try the known ones and use whichever the window actually has.
+  ITEM_MENU_IDS: ["zotero-itemmenu", "zotero-items-tree-context-menu"],
+
+  itemMenuPopup(win) {
+    for (let id of this.ITEM_MENU_IDS) {
+      let el = win.document.getElementById(id);
+      if (el) return el;
+    }
+    return null;
+  },
+
+  // The regular (non-attachment, non-note) items currently selected in the list.
+  selectedRegularItems(win) {
+    try {
+      let zp = win.ZoteroPane;
+      let items = (zp && zp.getSelectedItems && zp.getSelectedItems()) || [];
+      return items.filter((it) => it && it.isRegularItem && it.isRegularItem());
+    } catch (e) { return []; }
+  },
+
+  // "has" = already carries a DOI (field or an Extra "DOI:" line); "unsupported" =
+  // the item type has no DOI field; otherwise "missing" (a candidate for lookup).
+  itemDoiState(item) {
+    try {
+      if ((item.getField("DOI") || "").trim()) return "has";
+      if (/^\s*DOI\s*:/im.test(item.getField("extra") || "")) return "has";
+      let ok = false;
+      try { ok = Zotero.ItemFields.isValidForType(Zotero.ItemFields.getID("DOI"), item.itemTypeID); } catch (e) {}
+      return ok ? "missing" : "unsupported";
+    } catch (e) { return "unsupported"; }
+  },
+
+  // Add our two actions to the item-list context menu (idempotent per window).
+  addItemMenu(win) {
+    try {
+      let popup = this.itemMenuPopup(win);
+      if (!popup || win._zonItemMenu) return;
+      let doc = win.document;
+      let mk = (id, handler) => {
+        let mi = doc.createXULElement("menuitem");
+        mi.id = id;
+        mi.classList.add("zon-itemmenu");
+        mi.addEventListener("command", handler);
+        return mi;
+      };
+      let sep = doc.createXULElement("menuseparator");
+      sep.id = "zon-itemmenu-sep";
+      sep.classList.add("zon-itemmenu");
+      let miNote = mk("zon-itemmenu-create", () => this.bulkCreateNotes(win));
+      let miDOI = mk("zon-itemmenu-doi", () => this.findDOIsForItems(win));
+      popup.appendChild(sep);
+      popup.appendChild(miNote);
+      popup.appendChild(miDOI);
+      let onShow = () => this.updateItemMenu(win, { sep, miNote, miDOI });
+      popup.addEventListener("popupshowing", onShow);
+      win._zonItemMenu = { popup, items: [sep, miNote, miDOI], onShow };
+    } catch (e) { this.log("addItemMenu failed: " + e); }
+  },
+
+  // Show/label our menu items based on the live selection (runs on popupshowing).
+  updateItemMenu(win, els) {
+    try {
+      let items = this.selectedRegularItems(win);
+      let n = items.length;
+      let show = n > 0;
+      els.sep.hidden = !show;
+      els.miNote.hidden = !show;
+      els.miDOI.hidden = !show;
+      if (!show) return;
+      els.miNote.setAttribute("label",
+        n === 1 ? this.t("menu.createNote") : this.t("menu.createNotesN", { count: n }));
+      let missing = items.filter((it) => this.itemDoiState(it) === "missing").length;
+      els.miDOI.hidden = missing === 0;
+      els.miDOI.setAttribute("label",
+        missing === 1 ? this.t("menu.findDOI") : this.t("menu.findDOIN", { count: missing }));
+    } catch (e) {}
+  },
+
+  removeItemMenu(win) {
+    try {
+      let m = win._zonItemMenu;
+      if (!m) return;
+      try { m.popup.removeEventListener("popupshowing", m.onShow); } catch (e) {}
+      for (let el of m.items) { try { el.remove(); } catch (e) {} }
+      win._zonItemMenu = null;
+    } catch (e) {}
+  },
+
+  // -------------------------------------------------------- bulk note creation
+
+  async bulkCreateNotes(win) {
+    let items = this.selectedRegularItems(win);
+    if (!items.length) return;
+    if (!this.notesDir()) { this.popup(win, this.t("menu.title"), this.t("status.vaultUnset")); return; }
+    let pw = this.progress(win, this.t("menu.creatingTitle"));
+    let created = 0, existed = 0, skipped = 0, failed = 0;
+    for (let item of items) {
+      let r = await this.writeNoteForItem(win, item, null);
+      if (r.status === "created") created++;
+      else if (r.status === "exists") existed++;
+      else if (r.status === "no-citekey") skipped++;
+      else failed++;
+    }
+    // The open item-pane editor (if it's showing one of these items) still shows
+    // the "no note yet" banner — re-render any live editors so it picks up the file.
+    try { for (let w of Zotero.getMainWindows()) this.rerenderOpenEditors(w); } catch (e) {}
+    this.finishProgress(pw, this.t("menu.createdSummary", { created, existed, skipped, failed }));
+  },
+
+  // Re-render every live editor wrap in a window against its current item, so a
+  // just-created note replaces the empty-state banner without a reselection.
+  rerenderOpenEditors(win) {
+    let walk = (root) => {
+      if (!root || !root.querySelectorAll) return;
+      let ws;
+      try { ws = root.querySelectorAll(".zon-content"); } catch (e) { return; }
+      for (let w of ws) {
+        let rec = w._zon;
+        if (rec && rec.item) { try { this.renderInto(w, rec.item); } catch (e) {} }
+      }
+      try { for (let el of root.querySelectorAll("*")) if (el.shadowRoot) walk(el.shadowRoot); } catch (e) {}
+    };
+    walk(win.document);
+  },
+
+  // ----------------------------------------------------------- Crossref DOI lookup
+
+  async findDOIsForItems(win) {
+    let items = this.selectedRegularItems(win).filter((it) => this.itemDoiState(it) === "missing");
+    if (!items.length) { this.popup(win, this.t("menu.title"), this.t("doi.noneMissing")); return; }
+    let pw = this.progress(win, this.t("doi.searching"));
+    let found = 0, none = 0, failed = 0;
+    for (let item of items) {
+      try {
+        let r = await this.findDOIForItem(win, item);
+        if (r === "found") found++; else none++;
+      } catch (e) { this.log("findDOIForItem failed: " + e); failed++; }
+      // Be polite to the public Crossref pool between requests.
+      try { await new Promise((res) => win.setTimeout(res, 200)); } catch (e) {}
+    }
+    this.finishProgress(pw, this.t("doi.summary", { found, none, failed }));
+  },
+
+  // Look up ONE item's DOI on Crossref and write it back if a confident match is
+  // found. Returns "found" | "none". Never overwrites an existing DOI (the caller
+  // pre-filters to itemDoiState === "missing"); a weak title match writes nothing.
+  async findDOIForItem(win, item) {
+    if (!win.ZONCore) await this.injectCore(win);
+    let title = (item.getField("title") || "").trim();
+    if (!title) return "none";
+    let creators = item.getCreators ? item.getCreators() : [];
+    let author = (creators[0] && (creators[0].lastName || creators[0].name)) || "";
+    let year = win.ZONCore.extractYear(item.getField("date") || "");
+    let url = win.ZONCore.buildCrossrefURL({ title, author, year });
+    let resp = await Zotero.HTTP.request("GET", url, {
+      responseType: "text",
+      timeout: 15000,
+      headers: { "Accept": "application/json" },
+    });
+    let json;
+    try { json = JSON.parse(resp.responseText || resp.response || "{}"); } catch (e) { return "none"; }
+    let match = win.ZONCore.pickBestMatch(json, { title, author, year });
+    if (!match || !match.doi) return "none";
+    item.setField("DOI", match.doi);
+    await item.saveTx();
+    this.log("DOI set on " + item.key + ": " + match.doi);
+    return "found";
+  },
+
+  // ------------------------------------------------------------ progress popups
+
+  progress(win, headline) {
+    try {
+      let pw = new Zotero.ProgressWindow({ window: win });
+      pw.changeHeadline(headline);
+      pw.show();
+      return pw;
+    } catch (e) { this.log("progress window failed: " + e); return null; }
+  },
+  finishProgress(pw, text) {
+    try {
+      if (!pw) return;
+      pw.addDescription(text);
+      pw.startCloseTimer(7000);
+    } catch (e) {}
+  },
+  popup(win, headline, text) { this.finishProgress(this.progress(win, headline), text); },
 
   // ---------------------------------------------------------------- annotations
 

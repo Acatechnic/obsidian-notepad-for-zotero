@@ -12,4 +12,5 @@ export { parseTemplateFile, templateKind, templateUserOwnedKeys } from "../src/t
 export { parseManifest, hasManifest, applyManifest, setManifestEntry, removeManifestEntry, buildManifestFromScaffold, writeManifest, MANIFEST_KEY } from "../src/manifest.js";
 export { findMarkerRanges, rangeRevealed } from "../src/markers.js";
 export { COLOR_NAMES } from "../src/colors.js";
+export { buildCrossrefURL, pickBestMatch, normalizeTitle, titleSimilarity, normalizeDOI, crossrefYear, extractYear } from "../src/crossref.js";
 export { splitPath, vaultName, vaultRelative, buildObsidianUri, obsidianConfigPath, parseObsidianVaults, sanitizeFilename, isUnder } from "../src/paths.js";
