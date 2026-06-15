@@ -7,8 +7,10 @@ are two kinds of file here, distinguished only by name:
   **Create note from template** when an item has no note yet. Renders the
   frontmatter, citation, abstract, and empty section headings. You can keep
   several (`note.md`, `note-book.md`, `note-minimal.md`, …); the **default** is
-  set in Settings → Obsidian Notes → *Default note template*, and the Create
-  panel lets you pick a different one per note when you have more than one.
+  set in Settings → Obsidian Notes → *Default note template* (which can be **any**
+  template, not just `note-*` — including a per-annotation or field template, in
+  which case a created note is just that block), and the Create panel lets you pick
+  a different one per note.
 - **Every other file** (`highlight.md`, `key-quote.md`, …) — an *insertable block
   template*. Each appears in the **Template** dropdown in the item pane by its
   filename (without the extension). When you click **Insert**, the selected

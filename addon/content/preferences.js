@@ -62,13 +62,19 @@
     if (sel._zonPopulated) return;
     sel._zonPopulated = true;
     const cur = (Zotero.Prefs.get(PREFIX + "defaultNoteTemplate", true) || "note");
-    const names = new Set(["note", cur]);
+    // The default note template can be ANY template — a whole-note scaffold OR a
+    // per-annotation/field template (creating from one yields a note that's just
+    // that block; it links by its @<citekey>.md filename and its blocks still sync).
+    // Offer the built-in formats plus every file in the Templates folder, minus the
+    // reserved docs files.
+    const RESERVED = new Set(["templates", "readme"]);
+    const names = new Set(["note", "list", "quote", "callout", "compact", cur]);
     try {
       const dir = Zotero.Prefs.get(PREFIX + "templatesDir", true) || "";
       if (dir && _io && _pu) {
         for (const p of await _io.getChildren(dir)) {
-          const m = _pu.filename(p).match(/^(note(?:-[^.]+)?)\.(md|njk|txt)$/i);
-          if (m) names.add(m[1]);
+          const m = _pu.filename(p).match(/^(.+)\.(md|njk|txt)$/i);
+          if (m && !RESERVED.has(m[1].toLowerCase())) names.add(m[1]);
         }
       }
     } catch (e) {}
