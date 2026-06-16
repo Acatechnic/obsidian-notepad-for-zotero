@@ -335,6 +335,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     "btn.manageFields": "Sync Metadata",
     "btn.openObsidian": "Open in Obsidian",
     "btn.reload": "Reload",
+    "btn.more": "⋯ More",
     "btn.createNote": "Create note",
     "btn.setup": "Set up…",
     "btn.openSettings": "Open Settings",
@@ -353,6 +354,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     "tip.migrate": "Convert a legacy annotation dump into a live block",
     "tip.manageFields": "Give this note a self-contained zon: manifest so every field your template fills (Title, Author, Topics…) keeps syncing from Zotero — independent of later template edits. Static fields stay yours.",
     "tip.reload": "Re-read this note from disk",
+    "tip.more": "More actions (advanced)",
     "tip.autoSync": "Automatically pull new highlights into this note as you annotate the PDF (applies to all notes).",
     "tip.showMarkers": "Show the raw %% zon %% / %% ann %% provenance markers and the zon: block. Off = hidden (like Obsidian reading mode); the file always keeps them.",
     "tip.readMode": "Reading view: render links and headings inline. Off = raw markdown source. Presentational only — the file is unchanged.",
@@ -1066,6 +1068,11 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
         + ".zon-toolbar label{display:inline-flex;align-items:center;gap:4px;font-size:11px;cursor:pointer;"
         + "color:var(--fill-secondary,#6a6a6a);}"
         + ".zon-toolbar .zon-status{font-size:11px;min-height:13px;padding-left:2px;color:var(--fill-secondary,#888);}"
+        // "⋯ More" popover (Migrate / Sync Metadata).
+        + ".zon-more-wrap{position:relative;display:inline-flex;}"
+        + ".zon-more-menu{position:absolute;top:100%;left:0;margin-top:3px;z-index:10;display:flex;flex-direction:column;gap:3px;padding:4px;min-width:140px;"
+        + "background:var(--material-background,#fff);border:1px solid var(--fill-quinary,rgba(0,0,0,.18));border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.18);}"
+        + ".zon-more-menu button{width:100%;text-align:left;}"
         + ".zon-banner{padding:14px 4px;font-size:13px;color:var(--fill-secondary,#6a6a6a);}"
         + ".zon-banner-text{margin-bottom:6px;line-height:1.45;}"
         + ".zon-banner button,.zon-banner select{font-size:12px;padding:4px 11px;min-height:26px;}";
@@ -1126,8 +1133,28 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     insertBtn.title = this.t("tip.insert");
     let refreshBtn = h("button"); refreshBtn.textContent = this.t("btn.refresh");
     refreshBtn.title = this.t("tip.refresh");
+    // Migrate + Sync Metadata are advanced / rarely-needed (Refresh already syncs
+    // metadata from the template), so they live behind a "⋯ More" popover rather
+    // than cluttering the actions row.
+    let moreBtn = h("button"); moreBtn.textContent = this.t("btn.more"); moreBtn.title = this.t("tip.more");
     let migrateBtn = h("button"); migrateBtn.textContent = this.t("btn.migrate"); migrateBtn.title = this.t("tip.migrate");
     let manageBtn = h("button"); manageBtn.textContent = this.t("btn.manageFields"); manageBtn.title = this.t("tip.manageFields");
+    let moreMenu = h("div", "zon-more-menu"); moreMenu.append(manageBtn, migrateBtn); moreMenu.style.display = "none";
+    let moreWrap = h("div", "zon-more-wrap"); moreWrap.append(moreBtn, moreMenu);
+    moreBtn.addEventListener("click", (e) => {
+      try { e.stopPropagation(); } catch (e2) {}
+      moreMenu.style.display = moreMenu.style.display === "none" ? "flex" : "none";
+    });
+    // One guarded document listener closes any open More popover on an outside click
+    // (or after an item is chosen — the item's click bubbles up here).
+    try {
+      if (!doc._zonMoreCloser) {
+        doc._zonMoreCloser = true;
+        doc.addEventListener("click", () => {
+          try { for (let m of doc.querySelectorAll(".zon-more-menu")) m.style.display = "none"; } catch (e) {}
+        });
+      }
+    } catch (e) {}
     let openBtn = h("button"); openBtn.textContent = this.t("btn.openObsidian");
     let reloadBtn = h("button"); reloadBtn.textContent = this.t("btn.reload"); reloadBtn.title = this.t("tip.reload");
     let status = h("span", "zon-status");
@@ -1178,7 +1205,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     //  2. Note actions — operate on the whole note.
     //  3. View toggles — presentational, sit just above the editor they affect.
     let row1 = h("div", "zon-row"); row1.append(templateSel, colourSel, syncSel, insertBtn);
-    let row2 = h("div", "zon-row zon-row-actions"); row2.append(refreshBtn, migrateBtn, manageBtn);
+    let row2 = h("div", "zon-row zon-row-actions"); row2.append(refreshBtn, moreWrap);
     let row3 = h("div", "zon-row"); row3.append(openBtn, reloadBtn);
     let row4 = h("div", "zon-row zon-row-view"); row4.append(readLabel, frontLabel, markersLabel);
     toolbar.append(row1, row2, row3, row4, status);

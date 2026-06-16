@@ -5,6 +5,21 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-beta.4] — 2026-06-16
+
+### Added
+- **Auto-detect external edits.** Edit a note in Obsidian, switch back to Zotero,
+  and the pane now reloads automatically (like Obsidian's own file watching) — no
+  unsaved edits are ever clobbered (you get the conflict bar instead).
+
+### Changed
+- **Section header aligned** with Zotero's native Tags/Related heads (flush-left
+  logo + title), and the collapse chevron is now a proper-sized control.
+- **Live/static selector** labels simplified to `live` / `static`.
+- **"Open in Obsidian" + "Reload"** moved to their own row.
+- **Migrate + Sync Metadata** moved into a **"⋯ More"** menu (both are advanced /
+  rarely needed — Refresh already syncs metadata from your template).
+
 ## [1.0.0-beta.3] — 2026-06-16
 
 ### Changed
