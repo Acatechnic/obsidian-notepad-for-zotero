@@ -14,7 +14,18 @@ Zotero item pane** — and sync your PDF highlights into it as you read.
 >
 > Like it? [**Buy me a coffee ☕**](https://buymeacoffee.com/acatechnic)
 
-<!-- TODO: screenshots — item-pane editor, annotation sync, onboarding -->
+<!--
+SCREENSHOTS — drop three PNGs into docs/images/ (see docs/images/README.md for
+exactly what to capture), then delete this comment and uncomment the block below.
+
+## Screenshots
+
+| The note, in Zotero | Synced highlights |
+| --- | --- |
+| ![Editor pane](docs/images/01-editor-pane.png) | ![Annotation sync](docs/images/02-annotation-sync.png) |
+
+![First-run setup](docs/images/03-setup.png)
+-->
 
 ## Why
 
@@ -82,6 +93,23 @@ writing alone. Every write goes to a temporary file and is then renamed over the
 target (atomic), and the plugin tracks each open note's modified-time so it can
 detect and reconcile changes made outside Zotero.
 
+## Known limitations (beta)
+
+This is an early public beta — please report anything odd, and:
+
+- **Back up your notes, and consider pointing it at a *test* Zotero library first**
+  — especially before trying **Push tags → Zotero**, which is the one feature that
+  writes to your library.
+- **Sync is one-way by default** (Zotero → note). Reverse sync (note → Zotero) is
+  currently **tags only**, opt-in, and previews every change before writing.
+  Pushing other fields (title, authors, …) back to Zotero isn't supported yet.
+- **Not yet in the Zotero plugins directory** — install the `.xpi` from Releases
+  (it auto-updates from there).
+- Templates are written in **Nunjucks**; there's a small learning curve if you
+  want to customise them (built-in templates work out of the box).
+- A note must live **inside your configured notes folder** for the plugin to link
+  and sync it.
+
 ## Development
 
 ```bash
@@ -94,6 +122,12 @@ npm start           # launch Zotero with the plugin (hot reload)
 
 Built with [zotero-plugin-scaffold](https://github.com/northword/zotero-plugin-scaffold).
 Copy `.env.example` to `.env` and set your Zotero path for `start` / `test:zotero`.
+
+## Feedback
+
+Trying the beta? **First impressions, questions, and ideas** are very welcome in
+[**GitHub Discussions**](https://github.com/Acatechnic/obsidian-notepad-for-zotero/discussions);
+clear, reproducible bugs are best as [Issues](https://github.com/Acatechnic/obsidian-notepad-for-zotero/issues).
 
 ## Contributing
 
