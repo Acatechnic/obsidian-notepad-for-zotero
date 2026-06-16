@@ -55,6 +55,111 @@ var ZON = {
   DEFAULT_SHOWFRONTMATTER: true, // show the YAML frontmatter by default (toggle off to hide it)
   _templates: null,
 
+  // Starter templates that ship WITH the plugin. They serve two purposes:
+  //  1. onboarding (and the Settings button) writes any that are missing into the
+  //     user's chosen Templates folder, so they own + edit them in Obsidian;
+  //  2. they're a zero-config fallback — even with no Templates folder set, "Create
+  //     note" and the Insert dropdown work out of the box (see loadTemplates /
+  //     resolveNoteScaffoldText). Keyed by filename stem; written as `<stem>.md`.
+  // Kinds are auto-detected (templateKindOf): `note*` = whole-note scaffolds,
+  // `abstract` = a field block, the rest = per-annotation block formats.
+  BUILTIN_TEMPLATES: {
+    "note": `---
+citekey: "{{citekey}}"
+Title: "{{title}}"
+Year: "{{date | format("YYYY")}}"
+Author:
+{% for c in creators %} - "[[{{c.firstName}} {{c.lastName}}]]"
+{% endfor %}
+Journal: "[[J. {{publicationTitle}} ]]"
+Tags:
+  - Reference
+  - {{itemType}}
+Topics:
+{% if allTags %}
+{% for tag in allTags.split(", ") %}
+- "[[{{tag}}]]"
+{% endfor %}
+{% endif %}
+ZoteroLink: "{{desktopURI}}"
+KeyIdea:
+---
+
+**Citation:** {{bibliography}}
+
+**Abstract:** {%- if abstractNote %} {{abstractNote}} {% endif %}
+
+## Notes
+
+
+## Annotations
+%% zon kind=annotations colour=all sync=on format=list %%
+%% /zon %%
+`,
+    "note-minimal": `---
+citekey: "{{citekey}}"
+Title: "{{title}}"
+Year: "{{date | format("YYYY")}}"
+Author:
+{% for c in creators %} - "[[{{c.firstName}} {{c.lastName}}]]"
+{% endfor %}
+ZoteroLink: "{{desktopURI}}"
+KeyIdea:
+---
+
+## Notes
+
+
+## Annotations
+%% zon kind=annotations colour=all sync=on format=list %%
+%% /zon %%
+`,
+    "abstract": `%%! kind=field sync=on %%
+> [!abstract] Abstract
+> {{abstractNote}}
+`,
+    "critique": `%%! colour=red sync=on sep=blank %%
+> [!warning] p.{{page}}
+> {{text}}{% if comment %}
+>
+> {{comment}}{% endif %}
+`,
+    "key-quote": `%%! colour=yellow sync=on sep=blank %%
+> {{text}}
+> — [p.{{page}}]({{link}})
+{% if comment %}>
+> {{comment}}{% endif %}
+`,
+    "highlight": `- [p.{{page}}]({{link}}) "{{text}}"{% if comment %} — *{{comment}}*{% endif %}
+`,
+    "snapshot": `%%! sync=off %%
+- [p.{{page}}]({{link}}) "{{text}}"{% if comment %} — *{{comment}}*{% endif %}
+`,
+  },
+
+  // A short guide written alongside the starter templates (named TEMPLATES.md so
+  // loadTemplates skips it — see the readme/templates filter). Helps users who
+  // browse the folder in Obsidian.
+  BUILTIN_TEMPLATES_DOC: `# Zotero → Obsidian note templates
+
+These files are used by the **Obsidian Notepad for Zotero** plugin. They were
+copied here by the plugin so you can customise them — edit any file in Obsidian
+and the change applies on the next *Create note* / *Insert* / *Refresh*.
+
+Two kinds of file, distinguished only by name:
+
+- **\`note.md\`** and any **\`note-*.md\`** — *whole-note scaffolds*, used by
+  **Create note** when an item has no note yet. The default is set in
+  *Settings → Obsidian Notes → Default note template* (it can be any template).
+- **Every other file** (\`highlight.md\`, \`key-quote.md\`, \`abstract.md\`, …) —
+  an *insertable block template*; it appears in the **Template** dropdown in the
+  item pane and renders the item's annotations (or a field) into a live block.
+
+Templates are written in **Nunjucks**. Add a file → it shows up in the dropdown;
+delete one → it disappears (the plugin's built-in copy still works as a fallback).
+Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/main/docs/TEMPLATES.md
+`,
+
   // ---------------------------------------------------------------- lifecycle
 
   async init(rootURI) {
@@ -298,17 +403,22 @@ var ZON = {
     return out;
   },
 
-  // Resolve the path of a note scaffold to use. `name` (without extension) picks
-  // a specific scaffold; omitted → the default set in preferences. Falls back to
-  // the legacy single template file (PREF_TEMPLATE) if the folder has none.
-  async noteTemplatePath(name) {
-    let dir = this.templatesDir();
+  // Resolve the TEXT of a note scaffold by name, in priority order:
+  //   user Templates folder file → shipped BUILTIN_TEMPLATES → legacy templatePath.
+  // Guarantees "Create note" / "Manage fields" have a real scaffold even when no
+  // Templates folder is configured (fresh install). Returns "" only if nothing
+  // resolves (and the named template isn't a built-in).
+  async resolveNoteScaffoldText(name) {
     name = name || this.defaultNoteTemplate() || this.NOTE_SCAFFOLD_NAME;
+    let dir = this.templatesDir();
     if (dir) {
       let p = PathUtils.join(dir, name + ".md");
-      try { if (await IOUtils.exists(p)) return p; } catch (e) {}
+      try { if (await IOUtils.exists(p)) return await IOUtils.readUTF8(p); } catch (e) {}
     }
-    return this.templatePath();
+    if (this.BUILTIN_TEMPLATES[name] != null) return this.BUILTIN_TEMPLATES[name];
+    let legacy = this.templatePath();
+    if (legacy) { try { return await IOUtils.readUTF8(legacy); } catch (e) {} }
+    return "";
   },
 
   // Parse a template file into { item, sep, defaults }. Mirrors
@@ -393,10 +503,21 @@ var ZON = {
         } catch (e) {}
       }
     };
-    await load(this.formatsDir());     // legacy formats (lower priority)
-    await load(this.templatesDir());   // unified folder (wins)
+    this.addBuiltins(out);             // shipped starters (lowest priority)
+    await load(this.formatsDir());     // legacy formats
+    await load(this.templatesDir());   // unified folder (wins — user files override)
     this._templates = out;
     return out;
+  },
+
+  // Seed `out` with the plugin's BUILTIN_TEMPLATES, classified exactly like a
+  // loaded file. User-folder files of the same name override these afterwards.
+  addBuiltins(out) {
+    for (let name of Object.keys(this.BUILTIN_TEMPLATES)) {
+      let text = this.BUILTIN_TEMPLATES[name];
+      if (this.templateKindOf(text) === "document") out[name] = { kind: "document", text };
+      else out[name] = Object.assign({ kind: "format" }, this.parseTemplateText(text));
+    }
   },
   // Back-compat alias — some call sites still say loadCustomFormats.
   async loadCustomFormats() { return this.loadTemplates(); },
@@ -1411,7 +1532,7 @@ var ZON = {
   },
 
   // First-run flow: pick vault (detected or browsed) → pick notes folder →
-  // persist → reindex → re-render the pane.
+  // set up note templates → persist → reindex → re-render the pane.
   async runOnboarding(rec, win) {
     win = win || rec.host.ownerDocument.defaultView;
     let vault = "";
@@ -1429,8 +1550,59 @@ var ZON = {
     if (!notes) notes = vault;
     Zotero.Prefs.set(this.PREF_VAULT, vault, true);
     Zotero.Prefs.set(this.PREF_NOTES, notes, true);
+    await this.setupTemplatesFolder(win, notes || vault);
     await this.buildIndex();
     if (rec.item) await this.renderInto(rec.wrap, rec.item);
+  },
+
+  // Onboarding template step: offer to copy the shipped starter templates into a
+  // folder the user owns (and customises in Obsidian), then point the plugin at
+  // it. Skipping is safe — the built-ins still work as a fallback. Idempotent.
+  async setupTemplatesFolder(win, defaultPath) {
+    try {
+      let P = Services.prompt;
+      let flags = P.BUTTON_TITLE_IS_STRING * P.BUTTON_POS_0
+                + P.BUTTON_TITLE_IS_STRING * P.BUTTON_POS_1;
+      // confirmEx returns the index of the pressed button (0 = Choose, 1 = Skip).
+      let btn = P.confirmEx(win, "Note templates",
+        "Set up note templates?\n\n"
+        + "The plugin can copy starter templates — a default note layout plus "
+        + "highlight / quote / abstract blocks — into a folder in your vault, so "
+        + "you can edit them in Obsidian.\n\n"
+        + "You can skip this and set it up later in Settings → Obsidian Notes.",
+        flags, "Choose folder…", "Skip", null, null, {});
+      if (btn !== 0) return;
+      let tdir = await this.pickFolder(win, "Choose or create a folder for your note templates", defaultPath);
+      if (!tdir) return;
+      let n = await this.installBuiltinTemplates(tdir);
+      Zotero.Prefs.set(this.PREF_TEMPLATES_DIR, tdir, true);
+      await this.loadTemplates();
+      try {
+        P.alert(win, "Note templates", n > 0
+          ? ("Added " + n + " template file(s) to:\n" + tdir)
+          : ("Templates folder set to:\n" + tdir + "\n(existing files kept)"));
+      } catch (e) {}
+    } catch (e) { this.log("setupTemplatesFolder failed: " + e); }
+  },
+
+  // Write any missing starter templates (+ a short TEMPLATES.md guide) into `dir`.
+  // NEVER overwrites an existing file — idempotent, and preserves user edits on
+  // re-run. Returns the count of files actually written.
+  async installBuiltinTemplates(dir) {
+    if (!dir) return 0;
+    let written = 0;
+    try { await IOUtils.makeDirectory(dir, { createAncestors: true }); } catch (e) {}
+    let writeIfAbsent = async (filename, text) => {
+      let p = PathUtils.join(dir, filename);
+      try { if (await IOUtils.exists(p)) return; } catch (e) {}
+      try { await this.safeWrite(p, text); written++; }
+      catch (e) { this.log("install template failed (" + filename + "): " + e); }
+    };
+    for (let name of Object.keys(this.BUILTIN_TEMPLATES)) {
+      await writeIfAbsent(name + ".md", this.BUILTIN_TEMPLATES[name]);
+    }
+    await writeIfAbsent("TEMPLATES.md", this.BUILTIN_TEMPLATES_DOC);
+    return written;
   },
 
   // Open the plugin's preferences pane (best effort across Zotero builds).
@@ -1522,7 +1694,7 @@ var ZON = {
   async renderTemplateAsNote(win, item, name) {
     let t = this.allTemplates(win)[name];
     if (!t) {
-      let text = await IOUtils.readUTF8(await this.noteTemplatePath()).catch(() => "");
+      let text = await this.resolveNoteScaffoldText(name);
       return this.renderDocument(win, item, text);
     }
     if (t.kind === "document") return this.renderDocument(win, item, t.text);
@@ -2061,7 +2233,7 @@ var ZON = {
         merged = win.ZONCore.applyManifest(existing, data);
       } catch (e) { this.log("manifest refresh failed: " + e); merged = existing; }
     } else {
-      let scaffold = await IOUtils.readUTF8(await this.noteTemplatePath()).catch(() => null);
+      let scaffold = await this.resolveNoteScaffoldText();
       if (scaffold) {
         try {
           let fresh = win.ZONCore.render(scaffold, data);
@@ -2100,7 +2272,7 @@ var ZON = {
     if (rec.timer && await this.externallyChanged(rec)) { this.showConflict(rec); return; }
     await this.flush(rec);
     await this.loadTemplates();
-    let scaffold = await IOUtils.readUTF8(await this.noteTemplatePath()).catch(() => null);
+    let scaffold = await this.resolveNoteScaffoldText();
     if (!scaffold) { this.setStatus(rec, this.t("status.noScaffold")); return; }
     let existing = "";
     try { existing = await IOUtils.readUTF8(rec.path); } catch (e) { this.setStatus(rec, this.t("err.refreshRead") + e); return; }

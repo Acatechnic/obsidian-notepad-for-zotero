@@ -46,6 +46,44 @@
     }
   } catch (e) {}
 
+  // "Install starter templates…" — copy the plugin's bundled defaults into the
+  // Templates folder (existing files kept). If no folder is set yet, pick one
+  // first, persist it, then install. Delegates the write to Zotero.ZON.
+  function notify(msg) {
+    try { Services.prompt.alert(window, "Note templates", msg); } catch (e) {}
+  }
+  function pickFolderAsync() {
+    return new Promise((resolve) => {
+      let fp;
+      try { fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker); }
+      catch (e) { return resolve(""); }
+      fp.init(window.browsingContext || window, "Choose or create a folder for your note templates", fp.modeGetFolder);
+      fp.open((rv) => resolve(rv === Ci.nsIFilePicker.returnOK && fp.file ? fp.file.path : ""));
+    });
+  }
+  try {
+    const instBtn = document.getElementById("zon-templates-install");
+    if (instBtn) instBtn.addEventListener("click", async () => {
+      const ZON = Zotero.ZON;
+      if (!ZON || !ZON.installBuiltinTemplates) { notify("Plugin not ready — try reopening Settings."); return; }
+      const input = document.getElementById("zon-templates");
+      let dir = (input && input.value) || Zotero.Prefs.get(PREFIX + "templatesDir", true) || "";
+      if (!dir) {
+        dir = await pickFolderAsync();
+        if (!dir) return;
+        try { Zotero.Prefs.set(PREFIX + "templatesDir", dir, true); } catch (e) {}
+        if (input) { input.value = dir; input.dispatchEvent(new Event("change", { bubbles: true })); }
+      }
+      let n = 0;
+      try { n = await ZON.installBuiltinTemplates(dir); } catch (e) {}
+      try { await ZON.loadTemplates(); } catch (e) {}
+      // Refresh the Default-note dropdown to include any newly added scaffolds.
+      try { const sel = document.getElementById("zon-default-note"); if (sel) { sel._zonPopulated = false; populateDefaultNote(); } } catch (e) {}
+      notify(n > 0 ? ("Added " + n + " template file(s) to:\n" + dir)
+                   : ("No new files — templates already present in:\n" + dir));
+    });
+  } catch (e) {}
+
   // Populate the "Default note template" dropdown from the note scaffolds
   // (note.md / note-*.md) in the Templates folder. Always includes "note" and
   // the current value so the control is never empty if the folder can't be read.

@@ -5,6 +5,22 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Starter templates ship with the plugin.** A default note scaffold (`note`,
+  `note-minimal`) plus block templates (`abstract`, `critique`, `key-quote`,
+  `highlight`, `snapshot`) are now built in. First-run setup offers to copy them
+  into a Templates folder in your vault (which you then own and edit in Obsidian),
+  and Settings has an **Install starter templates…** button to do the same later.
+  Existing files are never overwritten.
+
+### Fixed
+- **Create note no longer produces an empty note on a fresh install.** Previously,
+  with no Templates folder configured, *Create note* rendered an empty scaffold.
+  The built-in templates now act as a zero-config fallback, so Create note / Insert
+  work out of the box even before any folder is set.
+
 ## [1.0.0-beta.1] — 2026-06-16
 
 First public beta. Highlights:
