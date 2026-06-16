@@ -71,6 +71,39 @@ export function findHeadingRanges(text) {
   return out;
 }
 
+// Emphasis: `**strong**` / `__strong__` and `*em*` / `_em_`. Returns the delimiter
+// ranges to hide and the inner content to style. Guards against the usual false
+// positives: `__`/`_` only fire at word boundaries (so snake_case is untouched),
+// `*`/`**` are kept distinct (the `**` of strong never reads as two `*` em), and
+// the content must be non-blank. Nested cases (`**a *b* c**`) yield both spans.
+const STAR2_RE = /\*\*(?=\S)(.+?)(?<=\S)\*\*/g;
+const UND2_RE = /(?<![\w*])__(?=\S)(.+?)(?<=\S)__(?![\w*])/g;
+const STAR1_RE = /(?<![\w*])\*(?!\*)(?=\S)(.+?)(?<=\S)\*(?![\w*])/g;
+const UND1_RE = /(?<![\w_])_(?!_)(?=\S)(.+?)(?<=\S)_(?![\w_])/g;
+
+export function findEmphasisRanges(text) {
+  const out = [];
+  eachBodyLine(String(text), (line, lineStart) => {
+    const scan = (re, dl, kind) => {
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(line))) {
+        const openFrom = lineStart + m.index;
+        const openTo = openFrom + dl;
+        const contentFrom = openTo;
+        const contentTo = contentFrom + m[1].length;
+        out.push({ openFrom, openTo, contentFrom, contentTo, closeFrom: contentTo, closeTo: contentTo + dl, kind });
+      }
+    };
+    scan(STAR2_RE, 2, "strong");
+    scan(UND2_RE, 2, "strong");
+    scan(STAR1_RE, 1, "em");
+    scan(UND1_RE, 1, "em");
+  });
+  out.sort((a, b) => a.openFrom - b.openFrom || a.kind.localeCompare(b.kind));
+  return out;
+}
+
 // `[label](target)` inline links. Images (`![alt](src)`) and empty-label links
 // are left raw. Targets may not contain `)` or a newline — fine for the
 // zotero://, https:// and doi links these notes use.

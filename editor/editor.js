@@ -20,7 +20,7 @@ import {
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { yamlFrontmatter } from "@codemirror/lang-yaml";
 import { findMarkerRanges, rangeRevealed } from "../src/markers.js";
-import { findFrontmatterRange, findHeadingRanges, findLinkRanges } from "../src/preview.js";
+import { findFrontmatterRange, findHeadingRanges, findLinkRanges, findEmphasisRanges } from "../src/preview.js";
 import {
   syntaxHighlighting,
   defaultHighlightStyle,
@@ -75,6 +75,8 @@ function makeTheme(dark) {
       ".cm-zon-h4": { fontSize: "1.1em" },
       ".cm-zon-h5": { fontSize: "1.0em" },
       ".cm-zon-h6": { fontSize: "0.92em", opacity: "0.85" },
+      ".cm-zon-strong": { fontWeight: "700" },
+      ".cm-zon-em": { fontStyle: "italic" },
     },
     { dark }
   );
@@ -190,6 +192,15 @@ function buildPresentation(state) {
       marks.push({
         from: l.labelFrom, to: l.labelTo,
         deco: Decoration.mark({ class: "cm-zon-link", attributes: { "data-zon-href": l.target } }),
+      });
+    }
+    for (const em of findEmphasisRanges(text)) {
+      if (touched(em.openFrom, em.closeTo)) continue; // editing this span → raw
+      hide.push({ from: em.openFrom, to: em.openTo }); // ** / * / __ / _
+      hide.push({ from: em.closeFrom, to: em.closeTo });
+      marks.push({
+        from: em.contentFrom, to: em.contentTo,
+        deco: Decoration.mark({ class: em.kind === "strong" ? "cm-zon-strong" : "cm-zon-em" }),
       });
     }
   }

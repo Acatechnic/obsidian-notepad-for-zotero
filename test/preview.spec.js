@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findFrontmatterRange, findHeadingRanges, findLinkRanges } from "../src/preview.js";
+import { findFrontmatterRange, findHeadingRanges, findLinkRanges, findEmphasisRanges } from "../src/preview.js";
 
 describe("findFrontmatterRange", () => {
   it("spans the leading --- … --- block inclusive of both fences", () => {
@@ -65,5 +65,40 @@ describe("findLinkRanges", () => {
     const r = findLinkRanges(t);
     expect(r.length).toBe(1);
     expect(r[0].label).toBe("real");
+  });
+});
+
+describe("findEmphasisRanges", () => {
+  const kinds = (t) => findEmphasisRanges(t).map((e) => e.kind);
+  const content = (t) => findEmphasisRanges(t).map((e) => t.slice(e.contentFrom, e.contentTo));
+
+  it("finds ** and __ strong, hiding the delimiters", () => {
+    const t = "**Abstract:** and __bold__";
+    const r = findEmphasisRanges(t);
+    expect(r.map((e) => e.kind)).toEqual(["strong", "strong"]);
+    expect(t.slice(r[0].openFrom, r[0].openTo)).toBe("**");
+    expect(t.slice(r[0].contentFrom, r[0].contentTo)).toBe("Abstract:");
+    expect(t.slice(r[0].closeFrom, r[0].closeTo)).toBe("**");
+    expect(content(t)).toEqual(["Abstract:", "bold"]);
+  });
+
+  it("finds * and _ emphasis", () => {
+    expect(content("*italic* and _slanted_")).toEqual(["italic", "slanted"]);
+    expect(kinds("*italic*")).toEqual(["em"]);
+  });
+
+  it("does NOT treat snake_case or intra-word underscores as emphasis", () => {
+    expect(findEmphasisRanges("query_date and a_b_c").length).toBe(0);
+  });
+
+  it("does not read the ** of strong as two single-* emphases", () => {
+    expect(kinds("**bold**")).toEqual(["strong"]);
+  });
+
+  it("ignores emphasis inside frontmatter and code fences", () => {
+    const t = '---\nx: "**no**"\n---\n\n```\n**no**\n```\n**yes**';
+    const r = findEmphasisRanges(t);
+    expect(r.length).toBe(1);
+    expect(t.slice(r[0].contentFrom, r[0].contentTo)).toBe("yes");
   });
 });

@@ -24,10 +24,11 @@ First public release. Highlights:
 - **Find DOI (Crossref)** — right-click items missing a DOI → look one up on
   Crossref by title/author/year and fill it in. Only writes a confident match
   (high title similarity + year check); never overwrites an existing DOI.
-- **Reading view** — render inline links `[label](target)` and `#` headings in the
-  editor like Obsidian (the markdown syntax is hidden, links are clickable). Toggle
-  it off for raw source. A separate **Frontmatter** toggle shows/hides the YAML
-  block. Both are presentational — the file on disk is never changed.
+- **Reading view** — render inline links `[label](target)`, `#` headings, and
+  `**bold**` / `*italic*` emphasis in the editor like Obsidian (the markdown
+  syntax is hidden, links are clickable). Toggle it off for raw source. A separate
+  **Frontmatter** toggle shows/hides the YAML block. Both are presentational — the
+  file on disk is never changed.
 - **Open in Obsidian** and **Migrate** (convert legacy annotation dumps to blocks).
 - **First-run onboarding** — detects your Obsidian vaults (`obsidian.json`) and
   lets you pick the vault + notes folder; **Browse…** folder pickers in Settings.
