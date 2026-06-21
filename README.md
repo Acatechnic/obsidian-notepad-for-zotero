@@ -3,6 +3,10 @@
 Open, edit, and keep an item's **Obsidian vault markdown note right inside the
 Zotero item pane** — and sync your PDF highlights into it as you read.
 
+<p align="center">
+  <img src="docs/images/00-demo.gif" alt="Toggling reading view: the note renders like Obsidian, or shows raw markdown" width="380">
+</p>
+
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/acatechnic)
 
 > Status: **public beta** (v1.0.0-beta.5). Cross-platform
@@ -14,18 +18,11 @@ Zotero item pane** — and sync your PDF highlights into it as you read.
 >
 > Like it? [**Buy me a coffee ☕**](https://buymeacoffee.com/acatechnic)
 
-<!--
-SCREENSHOTS — drop three PNGs into docs/images/ (see docs/images/README.md for
-exactly what to capture), then delete this comment and uncomment the block below.
-
 ## Screenshots
 
-| The note, in Zotero | Synced highlights |
-| --- | --- |
-| ![Editor pane](docs/images/01-editor-pane.png) | ![Annotation sync](docs/images/02-annotation-sync.png) |
-
-![First-run setup](docs/images/03-setup.png)
--->
+| The note, in Zotero | Synced highlights | Settings |
+| --- | --- | --- |
+| ![The Obsidian note rendered in the Zotero item pane](docs/images/01-editor-pane.png) | ![PDF highlights synced into the note](docs/images/02-annotation-sync.png) | ![Obsidian Notes settings](docs/images/03-setup.png) |
 
 ## Why
 

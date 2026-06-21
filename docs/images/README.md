@@ -1,22 +1,20 @@
-# README screenshots — capture checklist
+# README media
 
-Drop three PNGs in this folder with these exact names, then uncomment the
-**Screenshots** block near the top of the main `README.md`.
+These are embedded in the main `README.md`.
 
-On macOS, **⌘⇧4 then Space** captures a single window cleanly; or drag a region.
-Aim for a focused crop of the **item pane** (the right-hand column), not the whole
-Zotero window — the library list isn't needed and keeps the shot uncluttered.
-~1000–1400px wide is plenty.
-
-| File | What to capture |
+| File | What it shows |
 | --- | --- |
-| `01-editor-pane.png` | An item selected, the **Obsidian Notes** section open, a real note showing in the editor with **Reading view ON** (so it renders like Obsidian). Include the section header + toolbar. This is the hero shot. |
-| `02-annotation-sync.png` | A note scrolled to its **Annotations** block, showing a few synced highlights (each `- [p.N] "…"`). Shows the core value: highlights flowing in from the PDF. |
-| `03-setup.png` | Either the first-run **Set up…** empty state, **or** *Settings → Obsidian Notes* with the vault / notes / templates fields. Shows how quick setup is. |
+| `00-demo.gif` | The reading-view toggle — the note rendering like Obsidian vs. raw markdown. |
+| `01-editor-pane.png` | The Obsidian note rendered in the Zotero item pane (hero shot). |
+| `02-annotation-sync.png` | PDF highlights synced into the note's Annotations block. |
+| `03-setup.png` | Settings → Obsidian Notes (vault / notes / template paths redacted). |
 
-Tips:
-- Toggle **Show markers** OFF for a clean look, or ON if you want to show the
-  `%% zon %%` provenance markers — your call.
-- A short **GIF** (e.g. toggling Reading view, or highlighting in the PDF and
-  hitting Refresh) is even better than a static shot. Tools: [Kap](https://getkap.co)
-  or LICEcap. Save it as `00-demo.gif` and embed it at the very top.
+## Refreshing them
+
+- **Screenshots:** ⌘⇧4 then Space (window) or drag a region; crop to the item
+  pane, and **keep the library list and your vault paths out** (the Settings shot
+  has its paths redacted). Re-save over the same filenames.
+- **GIF:** record a short clip (e.g. with [Kap](https://getkap.co)) and convert:
+  `ffmpeg -i clip.mov -vf "fps=12,scale=560:-1:flags=lanczos,palettegen=stats_mode=diff" pal.png`
+  then
+  `ffmpeg -i clip.mov -i pal.png -lavfi "fps=12,scale=560:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer" -loop 0 00-demo.gif`
