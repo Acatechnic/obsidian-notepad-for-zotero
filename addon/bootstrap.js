@@ -23,6 +23,7 @@ var ZON = {
   _autoSyncTimer: null,     // debounce timer for annotation-driven auto-sync
   _autoSyncItems: null,     // Set<regular-item id> pending auto-sync
   _autoSyncAll: false,      // true when a delete left us unable to resolve the parent
+  _imgEpoch: 0,             // cache-bust token for in-pane image embeds; bumped when a PNG is re-exported
 
   PREF_VAULT: "extensions.zotero-obsidian-notes.vaultPath",
   PREF_NOTES: "extensions.zotero-obsidian-notes.notesDir",
@@ -1377,6 +1378,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
         readMode: self.readModeEnabled(),
         showFrontmatter: self.showFrontmatterEnabled(),
         vaultPath: self.vaultPath(), // lets reading view render vault-relative image embeds
+        imageEpoch: self._imgEpoch || 0, // cache-bust token so re-exported images reload
         onOpenLink: function (href) { self.openLink(win, href); },
       });
       rec.loading = false;
@@ -2163,9 +2165,10 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
 
   // Copy the cached PNG for each image annotation into the note's attachment
   // folder (vault-relative), so the `![[…]]` embeds resolve in Obsidian. Returns
-  // the count exported. No-op when the vault path is unset. Naming/embeds are
-  // produced in gatherAnnotations; this just realises the files. (Image/area
-  // annotations only — ink is deferred.)
+  // the number of files actually (re)written this call (0 = nothing changed) —
+  // the caller bumps the in-pane image cache-bust token when it's > 0. No-op when
+  // the vault path is unset. Naming/embeds are produced in gatherAnnotations; this
+  // just realises the files. (Image/area annotations only — ink is deferred.)
   //
   // Re-copies when the cached image actually changed: resizing/moving an image
   // annotation keeps the same key (so same filename) but Zotero regenerates the
@@ -2178,7 +2181,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     if (!vault) return 0;
     let segs = String(folder).split(/[\\/]/).filter(Boolean);
     let dir = PathUtils.join(vault, ...segs, citekey || "ref");
-    let n = 0;
+    let copied = 0; // files actually (re)written this call — caller uses it to bust the in-pane image cache
     for (let a of imgs) {
       try {
         let src = await Zotero.Annotations.getCacheImagePath(Zotero.Items.get(a._annotationID));
@@ -2193,13 +2196,13 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
           let d = await IOUtils.stat(dest); // throws if dest doesn't exist
           fresh = d.size === s.size && d.lastModified >= s.lastModified;
         } catch (e) { fresh = false; }
-        if (fresh) { n++; continue; }
+        if (fresh) continue;
         await IOUtils.makeDirectory(dir, { ignoreExisting: true, createAncestors: true });
         await IOUtils.copy(src, dest);
-        n++;
+        copied++;
       } catch (e) { this.log("exportAnnotationImages: " + e); }
     }
-    return n;
+    return copied;
   },
 
   // Does the item have a PDF attachment at all? Lets us tell "no annotations yet"
@@ -2308,12 +2311,20 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     try { existing = await IOUtils.readUTF8(rec.path); } catch (e) { return; }
     let anns = this.gatherAnnotations(item, win);
     let folder = this.resolveAttachmentFolder(existing, win);
-    try { await this.exportAnnotationImages(anns, this.getCitekey(item), folder, win); }
-    catch (e) { this.log("image export failed: " + e); }
+    try {
+      let copied = await this.exportAnnotationImages(anns, this.getCitekey(item), folder, win);
+      // A resized/moved image keeps the same key → same embed text, so the note
+      // body won't change below; but the PNG did. Bump the token + refresh the
+      // live view's images IN PLACE (no remount → no caret disruption).
+      if (copied) {
+        this._imgEpoch = (this._imgEpoch || 0) + 1;
+        try { if (rec.lib && rec.view && rec.lib.setImageEpoch) rec.lib.setImageEpoch(rec.view, this._imgEpoch); } catch (e) {}
+      }
+    } catch (e) { this.log("image export failed: " + e); }
     let updated;
     try { updated = win.ZONCore.syncBlocks(existing, anns, this.syncOpts(win, item, { attachmentFolder: folder })); }
     catch (e) { this.log("auto-sync syncBlocks failed: " + e); return; }
-    if (updated === existing) return; // nothing to do — no write, no caret disruption
+    if (updated === existing) return; // body unchanged — image (if any) already refreshed above
     try { await this.safeWrite(rec.path, updated); rec.diskMtime = await this.noteMtime(rec.path); }
     catch (e) { this.setStatus(rec, this.t("err.autoSyncWrite") + e); this.log("auto-sync write failed: " + e); return; }
     // Push the new content into the open editor. Guard with rec.loading so the
@@ -2404,8 +2415,10 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     let existing = "";
     try { existing = await IOUtils.readUTF8(rec.path); } catch (e) { this.setStatus(rec, this.t("err.syncRead") + e); return; }
     let folder = this.resolveAttachmentFolder(existing, win);
-    try { await this.exportAnnotationImages(anns, this.getCitekey(item), folder, win); }
-    catch (e) { this.log("image export failed: " + e); }
+    try {
+      let copied = await this.exportAnnotationImages(anns, this.getCitekey(item), folder, win);
+      if (copied) this._imgEpoch = (this._imgEpoch || 0) + 1; // mountEditor below reloads images with the new token
+    } catch (e) { this.log("image export failed: " + e); }
     let updated = win.ZONCore.syncBlocks(existing, anns, this.syncOpts(win, item, { attachmentFolder: folder }));
     if (updated !== existing) {
       try { await this.safeWrite(rec.path, updated); } catch (e) { this.setStatus(rec, this.t("err.syncWrite") + e); this.log("sync write failed: " + e); return; }
@@ -2466,8 +2479,10 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
 
     let anns = this.gatherAnnotations(item, win);
     let attachmentFolder = this.resolveAttachmentFolder(existing, win);
-    try { await this.exportAnnotationImages(anns, citekey, attachmentFolder, win); }
-    catch (e) { this.log("image export failed: " + e); }
+    try {
+      let copied = await this.exportAnnotationImages(anns, citekey, attachmentFolder, win);
+      if (copied) this._imgEpoch = (this._imgEpoch || 0) + 1; // mountEditor below reloads images with the new token
+    } catch (e) { this.log("image export failed: " + e); }
     try { merged = win.ZONCore.syncBlocks(merged, anns, { citekey, formats: this.formatMap(win), itemData: data, attachmentFolder }); }
     catch (e) { this.log("annotation refresh failed: " + e); }
 

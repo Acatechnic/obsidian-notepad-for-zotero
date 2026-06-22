@@ -196,7 +196,7 @@ class ImageEmbedWidget extends WidgetType {
 // Per-editor presentation config, updated live via setPresentation effects.
 const setPresentation = StateEffect.define();
 const presentationConfig = StateField.define({
-  create: () => ({ showMarkers: false, readMode: true, showFrontmatter: true, vaultPath: "" }),
+  create: () => ({ showMarkers: false, readMode: true, showFrontmatter: true, vaultPath: "", imageEpoch: 0 }),
   update(val, tr) {
     let v = val;
     for (const e of tr.effects) if (e.is(setPresentation)) v = { ...v, ...e.value };
@@ -263,11 +263,15 @@ function buildPresentation(state) {
     // Image embeds → inline <img>, but only those that resolve inside the vault.
     // Touching the embed reveals it raw so it stays editable/deletable.
     if (cfg.vaultPath) {
+      // Cache-bust the file:// URL with the epoch so a re-exported PNG at the SAME
+      // path (e.g. an image annotation resized → same key/filename) actually
+      // reloads — both the widget eq() and the browser image cache key on the URL.
+      const bust = cfg.imageEpoch ? "?e=" + cfg.imageEpoch : "";
       for (const im of findImageEmbedRanges(text)) {
         if (touched(im.from, im.to)) continue;
         const abs = resolveVaultImagePath(cfg.vaultPath, im.path);
         if (!abs) continue;
-        imgs.push({ from: im.from, to: im.to, widget: new ImageEmbedWidget(fileURL(abs), im.alt) });
+        imgs.push({ from: im.from, to: im.to, widget: new ImageEmbedWidget(fileURL(abs) + bust, im.alt) });
       }
     }
   }
@@ -322,6 +326,12 @@ export function setShowFrontmatter(view, show) {
   if (!view) return;
   try { view.dispatch({ effects: setPresentation.of({ showFrontmatter: !!show }) }); } catch (e) {}
 }
+// Bump the image cache-bust token on a LIVE view (used after an in-place auto-sync
+// re-exports a changed PNG, so the rendered <img> reloads without a full remount).
+export function setImageEpoch(view, epoch) {
+  if (!view) return;
+  try { view.dispatch({ effects: setPresentation.of({ imageEpoch: Number(epoch) || 0 }) }); } catch (e) {}
+}
 
 // `editable` controls whether the buffer can be typed into. `dark` selects the
 // light/dark colour scheme (detected from Zotero's theme by bootstrap).
@@ -330,7 +340,7 @@ export function setShowFrontmatter(view, show) {
 // the YAML block visible (default on). `onOpenLink(href)` is called when a
 // rendered inline link is clicked.
 export function create({ parent, doc, onChange, editable = true, dark = false,
-  showMarkers = false, readMode = true, showFrontmatter = true, vaultPath = "", onOpenLink } = {}) {
+  showMarkers = false, readMode = true, showFrontmatter = true, vaultPath = "", imageEpoch = 0, onOpenLink } = {}) {
   const root = parent.getRootNode ? parent.getRootNode() : undefined;
 
   const updateListener = EditorView.updateListener.of((u) => {
@@ -368,7 +378,7 @@ export function create({ parent, doc, onChange, editable = true, dark = false,
       // long-standing in-editor bug where the closing `---` turned the line above
       // it (ZoteroLink / KeyIdea) into a setext heading and rendered it bold.
       yamlFrontmatter({ content: markdown({ base: markdownLanguage }) }),
-      presentationConfig.init(() => ({ showMarkers, readMode, showFrontmatter, vaultPath })),
+      presentationConfig.init(() => ({ showMarkers, readMode, showFrontmatter, vaultPath, imageEpoch })),
       presentationField,
       linkClicks,
       keymap.of([

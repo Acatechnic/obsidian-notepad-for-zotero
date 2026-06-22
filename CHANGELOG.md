@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   editor — so imported image annotations are visible without switching to Obsidian.
   Purely presentational (toggle Reading view off to see the raw `![[…]]`); the file
   on disk is untouched. Restricted to images that resolve **inside** the vault.
+  A re-exported image (e.g. an annotation **resized/moved** — same filename, new
+  content) now reloads in the pane via a cache-bust token, instead of showing the
+  stale picture until the tab is closed and reopened.
 
 ## [1.0.0-beta.6] — 2026-06-22
 
