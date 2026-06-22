@@ -24,6 +24,8 @@ var ZON = {
   _autoSyncItems: null,     // Set<regular-item id> pending auto-sync
   _autoSyncAll: false,      // true when a delete left us unable to resolve the parent
   _imgEpoch: 0,             // cache-bust token for in-pane image embeds; bumped when a PNG is re-exported
+  _prefObservers: null,     // Zotero.Prefs observer handles (notes folder / filename pattern)
+  _rescanTimer: null,       // debounce timer for pref-driven rescans
 
   PREF_VAULT: "extensions.zotero-obsidian-notes.vaultPath",
   PREF_NOTES: "extensions.zotero-obsidian-notes.notesDir",
@@ -195,13 +197,16 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     } catch (e) { this.log("prefpane register failed: " + e); }
     this.buildIndex().catch((e) => this.log("index build failed: " + e));
     try { this.registerNotifier(); } catch (e) { this.log("registerNotifier failed: " + e); }
+    try { this.registerPrefObservers(); } catch (e) { this.log("registerPrefObservers failed: " + e); }
     this.log("initialized");
   },
 
   uninit() {
     try { if (this._registeredPaneID) Zotero.ItemPaneManager.unregisterSection(this._registeredPaneID); } catch (e) {}
     try { if (this._notifierID) Zotero.Notifier.unregisterObserver(this._notifierID); this._notifierID = null; } catch (e) {}
+    try { this.unregisterPrefObservers(); } catch (e) {}
     try { if (this._autoSyncTimer) { clearTimeout(this._autoSyncTimer); this._autoSyncTimer = null; } } catch (e) {}
+    try { if (this._rescanTimer) { clearTimeout(this._rescanTimer); this._rescanTimer = null; } } catch (e) {}
     // Tear down per-window state so a reinstall hot-reloads cleanly: destroy
     // editors, drop our content wraps (incl. shadow DOM), remove the injected
     // bundle <script>, and clear the global so startup re-injects the new one.
@@ -345,6 +350,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     "btn.more": "⋯ More",
     "btn.pushTags": "Push tags → Zotero…",
     "btn.createNote": "Create note",
+    "btn.rescan": "Rescan",
     "btn.setup": "Set up…",
     "btn.openSettings": "Open Settings",
     "btn.reloadDisk": "Reload from disk",
@@ -369,9 +375,11 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     "tip.readMode": "Reading view: render links and headings inline. Off = raw markdown source. Presentational only — the file is unchanged.",
     "tip.frontmatter": "Show the YAML frontmatter block at the top of the note. Off = hide it (still saved to the file).",
     "tip.noteTpl": "Template to build this note from",
+    "tip.rescan": "Re-scan your notes folder and re-link — use after adding or renaming notes outside Zotero, or changing the filename pattern in Settings.",
     "tip.setup": "Detect your Obsidian vaults (or choose a folder), then pick your notes folder",
     "tip.openSettings": "Configure paths manually in the Obsidian Notepad preferences",
-    "banner.noNote": "No linked note found for this item yet. Create one in {dir} from your template:",
+    "banner.noNote": "No linked note found for this item yet. Notes link by a citekey: or ZoteroLink: field first, then by filename. Create one in {dir}, or Rescan if you just added or renamed it outside Zotero:",
+    "banner.rescanned": "Rescanned {dir} — still no linked note for this item. Surest fix: add a citekey: or ZoteroLink: field to the note (matched first), or check the filename pattern in Settings.",
     "banner.setup": "Obsidian Notepad isn't set up yet. Point it at your Obsidian vault and the folder where your literature notes live.",
     "banner.conflict": "This note changed outside Zotero (e.g. in Obsidian). Reload to load the on-disk version, or overwrite it with what's shown here.",
     "status.saved": "Saved",
@@ -713,14 +721,16 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     this.indexing = (async () => {
       let map = new Map();      // itemKey  -> path (from ZoteroLink)
       let ckMap = new Map();    // citekey  -> path (frontmatter or @<citekey>.md)
+      let fileMap = new Map();  // filename (lowercased) -> path (for pattern matching)
       let dir = this.notesDir();
       let children;
       try { children = await IOUtils.getChildren(dir); }
-      catch (e) { this.log("cannot read notes dir " + dir + ": " + e); this.index = map; this.citekeyIndex = ckMap; return map; }
+      catch (e) { this.log("cannot read notes dir " + dir + ": " + e); this.index = map; this.citekeyIndex = ckMap; this.fileIndex = fileMap; return map; }
       let reLink = /ZoteroLink:[^\n]*items\/([A-Z0-9]+)/i;
       let reCite = /^citekey:\s*"?([^"\n]+?)"?\s*$/im;
       for (let p of children) {
         if (!p.endsWith(".md")) continue;
+        fileMap.set(PathUtils.filename(p).toLowerCase(), p); // for filename-pattern matching
         try {
           let text = await IOUtils.readUTF8(p);
           let head = text.slice(0, 2000); // keys live in frontmatter
@@ -737,7 +747,8 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
       }
       this.index = map;
       this.citekeyIndex = ckMap;
-      this.log("indexed " + map.size + " by item-key, " + ckMap.size + " by citekey, from " + dir);
+      this.fileIndex = fileMap;
+      this.log("indexed " + map.size + " by item-key, " + ckMap.size + " by citekey, " + fileMap.size + " files, from " + dir);
       return map;
     })();
     let r = await this.indexing;
@@ -756,10 +767,12 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
         if (parent) item = parent;
       }
     } catch (e) {}
+    // 1. Most reliable: a ZoteroLink (item key) in the note's frontmatter.
     let p = this.index.get(item.key);
     if (p) return p;
-    // Fallback: match by Better BibTeX citekey (notes that lack a ZoteroLink).
-    // Strict citekey only (no surname+year guess) to avoid false matches.
+    // 2. A `citekey:` frontmatter field, or a citekey-named file (@<citekey>.md /
+    //    <citekey>.md). Strict citekey only (no surname+year guess) — avoids
+    //    false matches.
     try {
       let ck = this.getCitekey(item, false);
       if (ck && this.citekeyIndex) {
@@ -767,7 +780,77 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
         if (cp) return cp;
       }
     } catch (e) {}
+    // 3. The configured filename convention: render the pattern for this item and
+    //    look for a file with exactly that name. Lets citekey-/title-named vaults
+    //    link without per-note frontmatter (1 & 2 are preferred + more robust).
+    try {
+      if (this.fileIndex && this.fileIndex.size) {
+        let win = Zotero.getMainWindows()[0];
+        if (win && !win.ZONCore) { try { await this.injectCore(win); } catch (e) {} }
+        if (win && win.ZONCore) {
+          let fn = this.expectedNoteFilename(win, item);
+          let fp = fn && this.fileIndex.get(fn.toLowerCase());
+          if (fp) return fp;
+        }
+      }
+    } catch (e) {}
     return null;
+  },
+
+  // The filename the plugin would give this item's note: the pattern rendered over
+  // the item's data, `.md` ensured, sanitised. Single source of truth for BOTH
+  // creating a note (writeNoteForItem) and matching one by filename (resolvePath),
+  // so the two can't drift.
+  expectedNoteFilename(win, item) {
+    let ck = this.getCitekey(item);
+    ck = ck ? win.ZONCore.sanitizeFilename(ck) : "";
+    let fn = this.renderFilename(win, item, ck);
+    if (!/\.md$/i.test(fn)) fn += ".md";
+    return win.ZONCore.sanitizeFilename(fn);
+  },
+
+  // Force a fresh index scan, then relink every open pane to its (possibly new)
+  // note. Driven by the manual "Rescan" button, and by notes-folder / filename-
+  // pattern changes. Safe + idempotent: only READS files and rebuilds the in-
+  // memory lookup; never writes, renames, or disturbs unsaved editor content
+  // (re-rendering a pane whose link is unchanged is a no-op).
+  async rescan() {
+    this.index = null; this.citekeyIndex = null; this.fileIndex = null;
+    await this.buildIndex();
+    for (let rec of this.openRecs()) {
+      if (!rec.item || !rec.wrap) continue;
+      try { await this.renderInto(rec.wrap, rec.item); } catch (e) { this.log("rescan re-render failed: " + e); }
+    }
+  },
+
+  // Debounced rescan, for preference observers (a pattern typed in Settings fires
+  // a change per keystroke).
+  scheduleRescan() {
+    try { if (this._rescanTimer) clearTimeout(this._rescanTimer); } catch (e) {}
+    let self = this;
+    this._rescanTimer = setTimeout(function () {
+      self._rescanTimer = null;
+      self.rescan().catch((e) => self.log("scheduled rescan failed: " + e));
+    }, 500);
+  },
+
+  // Re-index + relink when the notes folder or filename pattern changes in
+  // Settings, so notes appear/relink without a restart. (Same `global:true` name
+  // convention used by Prefs.get/set throughout.)
+  registerPrefObservers() {
+    if (!Zotero.Prefs || !Zotero.Prefs.registerObserver) return;
+    let self = this;
+    let h = function () { self.scheduleRescan(); };
+    this._prefObservers = [];
+    for (let pref of [this.PREF_NOTES, this.PREF_FILENAME]) {
+      try { this._prefObservers.push(Zotero.Prefs.registerObserver(pref, h, true)); }
+      catch (e) { this.log("pref observe failed " + pref + ": " + e); }
+    }
+  },
+  unregisterPrefObservers() {
+    if (!this._prefObservers) return;
+    for (let sym of this._prefObservers) { try { Zotero.Prefs.unregisterObserver(sym); } catch (e) {} }
+    this._prefObservers = null;
   },
 
   // ---------------------------------------------------------------- section
@@ -1298,7 +1381,8 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     // Create picker = the SAME unified template list, default scaffold first.
     let noteTplSel = h("select"); noteTplSel.title = this.t("tip.noteTpl");
     let createBtn = h("button", "zon-primary"); createBtn.textContent = this.t("btn.createNote");
-    createRow.append(noteTplSel, createBtn);
+    let rescanBtn = h("button"); rescanBtn.textContent = this.t("btn.rescan"); rescanBtn.title = this.t("tip.rescan");
+    createRow.append(noteTplSel, createBtn, rescanBtn);
     banner.append(bannerText, createRow);
 
     // First-run / not-configured empty state. Shown (instead of the editor +
@@ -1353,6 +1437,14 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     createBtn.addEventListener("click", () =>
       this.createNote(rec, rec.noteTplSel && rec.noteTplSel.value)
         .catch((e) => this.log("create failed: " + e)));
+    rescanBtn.addEventListener("click", async () => {
+      try {
+        rescanBtn.disabled = true;
+        await this.rescan(); // re-renders this pane too; if it links, we switch to the note view
+        if (!rec.path) rec.bannerText.textContent = this.t("banner.rescanned", { dir: this.notesDir() });
+      } catch (e) { this.log("rescan failed: " + e); }
+      finally { rescanBtn.disabled = false; }
+    });
     return rec;
   },
 
@@ -1905,13 +1997,9 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
       await this.loadTemplates();
       let citekey = this.getCitekey(item);
       if (!citekey) return { status: "no-citekey" };
-      // Sanitise the citekey (it can come from Better BibTeX / the Extra field)
-      // before it becomes a filename — strip separators / illegal chars.
-      citekey = win.ZONCore.sanitizeFilename(citekey);
-
-      let filename = this.renderFilename(win, item, citekey);
-      if (!/\.md$/i.test(filename)) filename += ".md";
-      filename = win.ZONCore.sanitizeFilename(filename); // the pattern itself may add junk
+      // Same filename the matcher (resolvePath) expects — one source of truth, so
+      // a created note links by its name straight away.
+      let filename = this.expectedNoteFilename(win, item);
       let dir = this.notesDir();
       let path = PathUtils.join(dir, filename);
       // Defence-in-depth: never write outside the configured notes folder.

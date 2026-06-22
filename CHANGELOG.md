@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   how your vault already names notes (e.g. `{{author}} {{year}} - {{title}}.md`).
   Previously only `{{citekey}}` was substituted. Illegal filename characters are
   still stripped automatically, and `.md` is appended if omitted.
+- **Existing notes link by your filename pattern too.** Note↔item matching now has
+  a third step: after a `citekey:` / `ZoteroLink:` frontmatter field (preferred and
+  most reliable), the plugin also matches an existing note whose filename equals the
+  pattern rendered for that item. So a vault named `{{author}} {{year}} - {{title}}`
+  links without per-note frontmatter. The empty-state and Settings now explain that
+  `citekey:`/`ZoteroLink:` is matched first.
+- **Re-links without a restart.** The note index rebuilds and re-links open panes
+  automatically when you change the **notes folder** or **filename pattern** in
+  Settings, and there's a new **Rescan** button (in the "no note found" state) to
+  pick up notes you added or renamed outside Zotero. Rescanning only reads files —
+  it never writes or disturbs unsaved edits.
 
 ### Added
 - **Image (area) annotations are imported.** On sync, each image/area annotation's
