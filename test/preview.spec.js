@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findFrontmatterRange, findHeadingRanges, findLinkRanges, findEmphasisRanges } from "../src/preview.js";
+import { findFrontmatterRange, findHeadingRanges, findLinkRanges, findEmphasisRanges, findImageEmbedRanges } from "../src/preview.js";
 
 describe("findFrontmatterRange", () => {
   it("spans the leading --- … --- block inclusive of both fences", () => {
@@ -100,5 +100,49 @@ describe("findEmphasisRanges", () => {
     const r = findEmphasisRanges(t);
     expect(r.length).toBe(1);
     expect(t.slice(r[0].contentFrom, r[0].contentTo)).toBe("yes");
+  });
+});
+
+describe("findImageEmbedRanges", () => {
+  const paths = (t) => findImageEmbedRanges(t).map((e) => e.path);
+
+  it("finds an Obsidian wiki image embed and spans the whole ![[…]]", () => {
+    const t = "- [p.2](zotero://x) ![[References/Attachments/k/k-p2-ABC.png]]";
+    const r = findImageEmbedRanges(t);
+    expect(r.length).toBe(1);
+    expect(r[0].path).toBe("References/Attachments/k/k-p2-ABC.png");
+    expect(t.slice(r[0].from, r[0].to)).toBe("![[References/Attachments/k/k-p2-ABC.png]]");
+  });
+
+  it("strips a |alias from a wiki embed but keeps the path", () => {
+    expect(paths("![[img/fig.png|a caption]]")).toEqual(["img/fig.png"]);
+  });
+
+  it("finds a markdown image and captures alt + src", () => {
+    const r = findImageEmbedRanges("![my fig](img/fig.jpg)");
+    expect(r[0].path).toBe("img/fig.jpg");
+    expect(r[0].alt).toBe("my fig");
+  });
+
+  it("only matches image extensions (not note embeds or plain links)", () => {
+    expect(findImageEmbedRanges("![[Some Other Note]] and [x](y.png)").length).toBe(0);
+  });
+
+  it("accepts common raster + vector extensions, case-insensitively", () => {
+    expect(paths("![[a.PNG]] ![[b.jpeg]] ![[c.webp]] ![[d.svg]]"))
+      .toEqual(["a.PNG", "b.jpeg", "c.webp", "d.svg"]);
+  });
+
+  it("tolerates a ?query / #fragment on a markdown image src", () => {
+    expect(paths("![](a/b.png?v=2)")).toEqual(["a/b.png?v=2"]);
+  });
+
+  it("ignores embeds inside frontmatter and code fences", () => {
+    const t = '---\ncover: "![[no.png]]"\n---\n\n```\n![[also-no.png]]\n```\n![[yes.png]]';
+    expect(paths(t)).toEqual(["yes.png"]);
+  });
+
+  it("finds multiple embeds on one line in order", () => {
+    expect(paths("![[a.png]] x ![[b.png]]")).toEqual(["a.png", "b.png"]);
   });
 });

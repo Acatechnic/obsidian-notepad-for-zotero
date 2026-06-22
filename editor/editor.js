@@ -10,6 +10,7 @@ import {
   drawSelection,
   highlightActiveLine,
   Decoration,
+  WidgetType,
 } from "@codemirror/view";
 import {
   defaultKeymap,
@@ -20,7 +21,7 @@ import {
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { yamlFrontmatter } from "@codemirror/lang-yaml";
 import { findMarkerRanges, rangeRevealed } from "../src/markers.js";
-import { findFrontmatterRange, findHeadingRanges, findLinkRanges, findEmphasisRanges } from "../src/preview.js";
+import { findFrontmatterRange, findHeadingRanges, findLinkRanges, findEmphasisRanges, findImageEmbedRanges } from "../src/preview.js";
 import {
   syntaxHighlighting,
   defaultHighlightStyle,
@@ -77,6 +78,14 @@ function makeTheme(dark) {
       ".cm-zon-h6": { fontSize: "0.92em", opacity: "0.85" },
       ".cm-zon-strong": { fontWeight: "700" },
       ".cm-zon-em": { fontStyle: "italic" },
+      // Reading view: rendered image embeds. Constrained so a big page-region
+      // snapshot doesn't dominate the pane; click opens it full-size.
+      ".cm-zon-img": { display: "block", margin: "4px 0" },
+      ".cm-zon-img img": {
+        maxWidth: "100%", maxHeight: "360px", height: "auto",
+        borderRadius: "4px", cursor: "zoom-in",
+        border: dark ? "1px solid rgba(255,255,255,0.12)" : "1px solid rgba(0,0,0,0.12)",
+      },
     },
     { dark }
   );
@@ -115,6 +124,53 @@ export function setDark(view, dark) {
   try { view.dispatch({ effects: themeCompartment.reconfigure(themeExtensions(!!dark)) }); } catch (e) {}
 }
 
+// ── Image embeds (in-pane display) ───────────────────────────────────────────
+//
+// Reading view renders a vault-relative image embed (`![[…png]]` / `![](…png)`)
+// as an inline <img>. We resolve the embed against the note's vault root and load
+// it via a file:// URL (the editor iframe is privileged and loads local files).
+// Restricted to paths that stay INSIDE the vault and end in an image extension —
+// a note is plain text and could otherwise point the pane at an arbitrary file.
+
+// Resolve a vault-RELATIVE embed path to an absolute path inside `vaultPath`, or
+// null if it isn't safe/renderable (absolute, a URL, or escaping the vault).
+function resolveVaultImagePath(vaultPath, p) {
+  if (!vaultPath || !p) return null;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(p)) return null; // http(s)://, file://, etc.
+  if (p[0] === "/" || /^[a-zA-Z]:[\\/]/.test(p)) return null; // absolute path
+  const rel = p.replace(/^\.?[\\/]/, "");
+  const segs = rel.split(/[\\/]/);
+  if (segs.some((s) => s === ".." || s === "")) return null; // no escaping / empty
+  return vaultPath.replace(/[\\/]+$/, "") + "/" + segs.join("/");
+}
+
+function fileURL(absPath) {
+  // file:// + an absolute POSIX path (leading "/") yields the correct file:///… ;
+  // encodeURI keeps spaces etc. valid. Backslashes (Windows) → forward slashes.
+  return "file://" + encodeURI(absPath.replace(/\\/g, "/"));
+}
+
+class ImageEmbedWidget extends WidgetType {
+  constructor(src, alt) { super(); this.src = src; this.alt = alt || ""; }
+  eq(other) { return other.src === this.src && other.alt === this.alt; }
+  toDOM(view) {
+    const doc = (view && view.dom && view.dom.ownerDocument) || document;
+    const wrap = doc.createElement("span");
+    wrap.className = "cm-zon-img";
+    const img = doc.createElement("img");
+    img.src = this.src;
+    img.alt = this.alt;
+    img.title = this.alt;
+    img.loading = "lazy";
+    // A missing file would otherwise show a broken-image glyph; hide it so the
+    // line just reads as (rendered-away) embed text rather than an error icon.
+    img.addEventListener("error", () => { try { wrap.style.display = "none"; } catch (e) {} });
+    wrap.appendChild(img);
+    return wrap;
+  }
+  ignoreEvent() { return true; }
+}
+
 // ── Phase D + E: presentation layer ─────────────────────────────────────────
 //
 // The note's raw markdown source carries things that Obsidian renders or hides:
@@ -140,7 +196,7 @@ export function setDark(view, dark) {
 // Per-editor presentation config, updated live via setPresentation effects.
 const setPresentation = StateEffect.define();
 const presentationConfig = StateField.define({
-  create: () => ({ showMarkers: false, readMode: true, showFrontmatter: true }),
+  create: () => ({ showMarkers: false, readMode: true, showFrontmatter: true, vaultPath: "" }),
   update(val, tr) {
     let v = val;
     for (const e of tr.effects) if (e.is(setPresentation)) v = { ...v, ...e.value };
@@ -157,6 +213,7 @@ function buildPresentation(state) {
 
   const hide = []; // {from,to} → replace (and atomic)
   const marks = []; // {from,to,deco} → mark decorations (styling only)
+  const imgs = []; // {from,to,widget} → replace-with-<img> (and atomic)
 
   const fm = findFrontmatterRange(text);
   const hideFM = !cfg.showFrontmatter && !!fm;
@@ -203,21 +260,36 @@ function buildPresentation(state) {
         deco: Decoration.mark({ class: em.kind === "strong" ? "cm-zon-strong" : "cm-zon-em" }),
       });
     }
+    // Image embeds → inline <img>, but only those that resolve inside the vault.
+    // Touching the embed reveals it raw so it stays editable/deletable.
+    if (cfg.vaultPath) {
+      for (const im of findImageEmbedRanges(text)) {
+        if (touched(im.from, im.to)) continue;
+        const abs = resolveVaultImagePath(cfg.vaultPath, im.path);
+        if (!abs) continue;
+        imgs.push({ from: im.from, to: im.to, widget: new ImageEmbedWidget(fileURL(abs), im.alt) });
+      }
+    }
   }
 
-  // Drop any hide range overlapping an earlier one (defensive — they shouldn't,
-  // but a stray overlap would crash CM rather than just look wrong).
-  hide.sort((a, b) => a.from - b.from || b.to - a.to);
+  // All replace decorations (plain "hide" + image widgets) share one atomic layer
+  // and must NOT overlap — CM throws on overlapping replaces. Merge them, sort,
+  // and drop any range that starts before the previous one ended (defensive: they
+  // shouldn't overlap, but a stray collision would crash CM rather than look wrong).
+  const replaces = [];
+  for (const r of hide) replaces.push({ from: r.from, to: r.to, deco: Decoration.replace({}) });
+  for (const im of imgs) replaces.push({ from: im.from, to: im.to, deco: Decoration.replace({ widget: im.widget }) });
+  replaces.sort((a, b) => a.from - b.from || b.to - a.to);
   const kept = [];
   let lastTo = -1;
-  for (const r of hide) {
+  for (const r of replaces) {
     if (r.from < lastTo) continue;
     kept.push(r);
     lastTo = r.to;
   }
 
   const all = [];
-  for (const r of kept) all.push(Decoration.replace({}).range(r.from, r.to));
+  for (const r of kept) all.push(r.deco.range(r.from, r.to));
   for (const m of marks) all.push(m.deco.range(m.from, m.to));
   return {
     deco: Decoration.set(all, true),
@@ -258,7 +330,7 @@ export function setShowFrontmatter(view, show) {
 // the YAML block visible (default on). `onOpenLink(href)` is called when a
 // rendered inline link is clicked.
 export function create({ parent, doc, onChange, editable = true, dark = false,
-  showMarkers = false, readMode = true, showFrontmatter = true, onOpenLink } = {}) {
+  showMarkers = false, readMode = true, showFrontmatter = true, vaultPath = "", onOpenLink } = {}) {
   const root = parent.getRootNode ? parent.getRootNode() : undefined;
 
   const updateListener = EditorView.updateListener.of((u) => {
@@ -296,7 +368,7 @@ export function create({ parent, doc, onChange, editable = true, dark = false,
       // long-standing in-editor bug where the closing `---` turned the line above
       // it (ZoteroLink / KeyIdea) into a setext heading and rendered it bold.
       yamlFrontmatter({ content: markdown({ base: markdownLanguage }) }),
-      presentationConfig.init(() => ({ showMarkers, readMode, showFrontmatter })),
+      presentationConfig.init(() => ({ showMarkers, readMode, showFrontmatter, vaultPath })),
       presentationField,
       linkClicks,
       keymap.of([

@@ -1376,6 +1376,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
         showMarkers: self.showMarkersEnabled(),
         readMode: self.readModeEnabled(),
         showFrontmatter: self.showFrontmatterEnabled(),
+        vaultPath: self.vaultPath(), // lets reading view render vault-relative image embeds
         onOpenLink: function (href) { self.openLink(win, href); },
       });
       rec.loading = false;

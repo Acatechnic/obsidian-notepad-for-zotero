@@ -16,8 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Zotero Integration plugin. The folder is set in **Settings → Image-annotation
   folder** and can be overridden per-note via `zon: attachments:` (same
   global-default-plus-per-note pattern as tag sync). Export is idempotent —
-  re-syncing won't duplicate files. *(Ink/drawing annotations are not exported yet:
-  Zotero only caches the strokes, with no underlying page content.)*
+  re-syncing won't duplicate files, and an image annotation that's **resized or
+  moved** is re-exported so the embedded picture stays current. *(Ink/drawing
+  annotations are not exported yet: Zotero only caches the strokes, with no
+  underlying page content.)*
+- **Image embeds render in the note pane.** In Reading view, a vault-relative
+  image embed (`![[…png]]` / `![](…png)`) now displays as an inline picture in the
+  editor — so imported image annotations are visible without switching to Obsidian.
+  Purely presentational (toggle Reading view off to see the raw `![[…]]`); the file
+  on disk is untouched. Restricted to images that resolve **inside** the vault.
 
 ## [1.0.0-beta.6] — 2026-06-22
 

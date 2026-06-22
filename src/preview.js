@@ -132,3 +132,34 @@ export function findLinkRanges(text) {
   });
   return out;
 }
+
+// Image embeds to render in reading view: Obsidian wiki-embeds `![[path]]`
+// (optionally `![[path|alias]]`) and markdown images `![alt](src)`. Only paths
+// ending in a known image extension are returned; the `path` is captured verbatim
+// and the caller resolves it against the vault and decides whether to render.
+// Skips frontmatter + fenced code, like the other finders. `from`/`to` span the
+// whole embed (so the editor can replace it with an <img> widget).
+const IMG_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|bmp|avif)$/i;
+const WIKI_EMBED_RE = /!\[\[([^\]\n|]+?)(?:\|[^\]\n]*)?\]\]/g;
+const MD_IMAGE_RE = /!\[([^\]\n]*)\]\(([^)\n]+?)\)/g;
+
+export function findImageEmbedRanges(text) {
+  const out = [];
+  eachBodyLine(String(text), (line, lineStart) => {
+    let m;
+    WIKI_EMBED_RE.lastIndex = 0;
+    while ((m = WIKI_EMBED_RE.exec(line))) {
+      const path = m[1].trim();
+      if (!IMG_EXT_RE.test(path)) continue;
+      out.push({ from: lineStart + m.index, to: lineStart + m.index + m[0].length, path, alt: path });
+    }
+    MD_IMAGE_RE.lastIndex = 0;
+    while ((m = MD_IMAGE_RE.exec(line))) {
+      const path = m[2].trim();
+      if (!IMG_EXT_RE.test(path.replace(/[?#].*$/, ""))) continue; // tolerate ?query / #frag
+      out.push({ from: lineStart + m.index, to: lineStart + m.index + m[0].length, path, alt: m[1] || path });
+    }
+  });
+  out.sort((a, b) => a.from - b.from);
+  return out;
+}
