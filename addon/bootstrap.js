@@ -35,6 +35,7 @@ var ZON = {
   PREF_SHOWMARKERS: "extensions.zotero-obsidian-notes.showMarkers",
   PREF_READMODE: "extensions.zotero-obsidian-notes.readMode",
   PREF_SHOWFRONTMATTER: "extensions.zotero-obsidian-notes.showFrontmatter",
+  PREF_COLLAPSED: "extensions.zotero-obsidian-notes.sectionCollapsed",
   PREF_TAGFIELD: "extensions.zotero-obsidian-notes.tagSyncField",
   PREF_EXPERIMENTAL: "extensions.zotero-obsidian-notes.experimental",
   // Defaults are intentionally empty — the vault and folders are user-specific and
@@ -55,6 +56,7 @@ var ZON = {
   DEFAULT_SHOWMARKERS: false, // editor presentation: hide %% zon/ann %% markers + zon: block by default (Obsidian-like)
   DEFAULT_READMODE: true, // reading view: render links/headings inline by default (toggle off for raw source)
   DEFAULT_SHOWFRONTMATTER: true, // show the YAML frontmatter by default (toggle off to hide it)
+  DEFAULT_COLLAPSED: false, // section starts expanded; the header chevron folds it (persisted)
   DEFAULT_TAGFIELD: "Topics", // default frontmatter field mirrored to Zotero tags (per-note override via `zon: tags:`)
   DEFAULT_EXPERIMENTAL: false, // hide the "⋯ More" menu (Sync Metadata / Migrate / Push tags) unless opted in
   _templates: null,
@@ -332,7 +334,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
   // section header/sidenav must use Zotero's l10nID mechanism — see the .ftl.)
   STRINGS: {
     "btn.insert": "Insert",
-    "btn.refresh": "Refresh",
+    "btn.refresh": "Update",
     "btn.migrate": "Migrate",
     "btn.manageFields": "Sync Metadata",
     "btn.openObsidian": "Open in Obsidian",
@@ -611,6 +613,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     seed(this.PREF_SHOWMARKERS, this.DEFAULT_SHOWMARKERS);
     seed(this.PREF_READMODE, this.DEFAULT_READMODE);
     seed(this.PREF_SHOWFRONTMATTER, this.DEFAULT_SHOWFRONTMATTER);
+    seed(this.PREF_COLLAPSED, this.DEFAULT_COLLAPSED);
     seed(this.PREF_TAGFIELD, this.DEFAULT_TAGFIELD);
     seed(this.PREF_EXPERIMENTAL, this.DEFAULT_EXPERIMENTAL);
   },
@@ -635,6 +638,10 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
   experimentalEnabled() {
     try { let v = Zotero.Prefs.get(this.PREF_EXPERIMENTAL, true); return v === undefined ? this.DEFAULT_EXPERIMENTAL : !!v; }
     catch (e) { return this.DEFAULT_EXPERIMENTAL; }
+  },
+  sectionCollapsed() {
+    try { let v = Zotero.Prefs.get(this.PREF_COLLAPSED, true); return v === undefined ? this.DEFAULT_COLLAPSED : !!v; }
+    catch (e) { return this.DEFAULT_COLLAPSED; }
   },
   tagSyncField() {
     try { let v = Zotero.Prefs.get(this.PREF_TAGFIELD, true); return (v == null || v === "") ? this.DEFAULT_TAGFIELD : String(v); }
@@ -868,16 +875,17 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     let go = function () {
       if (self._lastPaintItemID !== itemID) return; // user moved to another item while retrying
       let sections = self.connectedSections();
-      // Zotero's <collapsible-section> shows its `label` ATTRIBUTE as the head
-      // title. Fluent won't apply our zon-header `.label` to a plugin section
-      // (the attribute isn't whitelisted), so the header was blank — set it
-      // ourselves on every connected copy (idempotent). (bug 5)
-      // Set the section title: Zotero's native collapsible-section head shows the
-      // `label` attribute (Fluent won't apply our zon-header .label to a plugin
-      // section), so set it on every connected copy (idempotent). The native head
-      // also draws our registered icon + a collapse twisty — no custom header. (bug 5)
+      // Zotero does NOT build its native styled .head for `custom` plugin
+      // sections — it just dumps the `label` attribute as a BARE, unstyled text
+      // node directly inside the <collapsible-section> (verified: no .head element,
+      // childNodes === [TEXT:"Obsidian Notes", div.zon-content]). So we render our
+      // OWN header (icon + muted-bold title + chevron, matching Tags/Related)
+      // inside .zon-content, and suppress Zotero's dump two ways: (a) keep the
+      // label EMPTY so there's nothing to render, and (b) strip any stray
+      // non-whitespace text node on every paint (idempotent). (bug 5)
       for (let cs of sections) {
-        try { if (cs.getAttribute("label") !== "Obsidian Notes") cs.setAttribute("label", "Obsidian Notes"); } catch (e) {}
+        try { if (cs.getAttribute("label")) cs.setAttribute("label", ""); } catch (e) {}
+        try { for (let n of [...cs.childNodes]) if (n.nodeType === 3 && n.textContent.trim()) n.remove(); } catch (e) {}
       }
       let win = (sections[0] && sections[0].ownerDocument.defaultView) || Zotero.getMainWindows()[0];
       // Prefer the active tab's section; fall back to the viewport-visible one,
@@ -1044,7 +1052,20 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
       let style = doc.createElementNS("http://www.w3.org/1999/xhtml", "style");
       style.id = "zon-toolbar-css";
       style.textContent =
-        ".zon-toolbar{display:flex;flex-direction:column;gap:7px;padding:4px 3px 9px;}"
+        // Section header — matches Zotero's native Tags/Related head (muted, bold,
+        // 13px) with our crystal logo. context-fill so the SVG picks up the colour.
+        // Header flush-left (no left padding) so the icon + title line up with the
+        // native section heads (Tags/Related) above it.
+        ".zon-header-bar{display:flex;align-items:center;gap:6px;padding:2px 0 6px 0;cursor:pointer;user-select:none;}"
+        + ".zon-header-icon{width:16px;height:16px;opacity:.9;-moz-context-properties:fill,stroke;fill:currentColor;color:var(--fill-secondary,#6a6a6a);}"
+        + ".zon-header-title{font-weight:600;font-size:13px;color:var(--fill-secondary,#6a6a6a);}"
+        // Collapse chevron — sized + right-aligned to match the native section twisty
+        // (a ~20px control at the right edge). Rotates to point right when collapsed.
+        + ".zon-header-chevron{margin-left:auto;width:20px;text-align:center;font-size:16px;line-height:1;opacity:.7;color:var(--fill-secondary,#6a6a6a);transition:transform .12s ease;}"
+        + ".zon-content.zon-collapsed > :not(.zon-header-bar){display:none;}"
+        + ".zon-content.zon-collapsed .zon-header-chevron{transform:rotate(-90deg);}"
+        + ".zon-content.zon-collapsed .zon-header-bar{padding-bottom:2px;}"
+        + ".zon-toolbar{display:flex;flex-direction:column;gap:7px;padding:4px 3px 9px;}"
         + ".zon-row{display:flex;flex-wrap:wrap;gap:5px;align-items:center;}"
         // View toggles sit just above the editor; a hairline + a hair more space
         // separates these presentational switches from the action buttons above.
@@ -1090,8 +1111,21 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
 
     this.injectToolbarCSS(win);
 
-    // (No custom header: current Zotero renders the native collapsible-section
-    // head — icon + "Obsidian Notes" label + collapse twisty — for our section.)
+    // Our own section header. Zotero doesn't give `custom` plugin sections the
+    // native icon+title head (see paintSection — it only dumps a bare text node),
+    // so we render one styled to match the Tags / Related headers: small logo +
+    // muted-bold title + a collapse chevron.
+    let header = h("div", "zon-header-bar");
+    let headerIcon = h("img", "zon-header-icon"); headerIcon.src = this.icon;
+    let headerTitle = h("span", "zon-header-title"); headerTitle.textContent = "Obsidian Notes";
+    let chevron = h("span", "zon-header-chevron"); chevron.textContent = "⌄";
+    header.append(headerIcon, headerTitle, chevron);
+    // Click the header to collapse/expand the whole section (persisted, all panes).
+    header.addEventListener("click", () => {
+      let collapsed = !wrap.classList.contains("zon-collapsed");
+      try { Zotero.Prefs.set(this.PREF_COLLAPSED, collapsed, true); } catch (e) {}
+      this.applyCollapsedAll(collapsed);
+    });
 
     let toolbar = h("div", "zon-toolbar");
 
@@ -1189,17 +1223,17 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     });
 
     // Three grouped rows, each wrapping independently:
-    //  1. Insert group — template + colour + auto-update lead INTO the Insert button.
-    //  2. Note actions — operate on the whole note.
+    //  1. Insert group — template + colour + live/static lead INTO the Insert button.
+    //  2. Note actions — Update + Open in Obsidian + Reload all operate on the whole
+    //     note, so they share one row.
     //  3. View toggles — presentational, sit just above the editor they affect.
     let row1 = h("div", "zon-row"); row1.append(templateSel, colourSel, syncSel, insertBtn);
-    // "⋯ More" (Sync Metadata / Migrate / Push tags) is hidden unless experimental
-    // features are enabled in Settings — keeps the everyday toolbar uncluttered.
-    let row2 = h("div", "zon-row zon-row-actions"); row2.append(refreshBtn);
+    // "⋯ More" (Sync Metadata / Migrate / Push tags) is appended only when
+    // experimental features are enabled in Settings — keeps the row uncluttered.
+    let row2 = h("div", "zon-row zon-row-actions"); row2.append(refreshBtn, openBtn, reloadBtn);
     if (this.experimentalEnabled()) row2.append(moreWrap);
-    let row3 = h("div", "zon-row"); row3.append(openBtn, reloadBtn);
     let row4 = h("div", "zon-row zon-row-view"); row4.append(readLabel, frontLabel, markersLabel);
-    toolbar.append(row1, row2, row3, row4, status);
+    toolbar.append(row1, row2, row4, status);
 
     // When the template changes, reflect its pinned defaults (colour/sync).
     let applyTemplateDefaults = () => {
@@ -1265,7 +1299,8 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     // Conflict bar goes ABOVE the editor so its Reload/Overwrite buttons are
     // always visible (the editor host is tall — 60vh — and would push them
     // off-screen if the bar were below it).
-    wrap.append(toolbar, conflict, host, banner, setup);
+    wrap.append(header, toolbar, conflict, host, banner, setup);
+    if (this.sectionCollapsed()) wrap.classList.add("zon-collapsed");
 
     let rec = { view: null, lib: null, iframe: null, frameWin: null, host, toolbar, banner, bannerText, setup, conflict, noteTplSel, templateSel, colourSel, syncSel, markersChk, readChk, frontChk, applyTemplateDefaults, statusEl: status, wrap, path: null, item: null, loading: false, timer: null, diskMtime: null };
 
@@ -2227,6 +2262,14 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     for (let rec of this.openRecs()) {
       try { if (rec.frontChk && rec.frontChk.checked !== show) rec.frontChk.checked = show; } catch (e) {}
       try { if (rec.lib && rec.view && rec.lib.setShowFrontmatter) rec.lib.setShowFrontmatter(rec.view, show); } catch (e) {}
+    }
+  },
+
+  // Collapse/expand every open section's body (everything but the header) to match
+  // the global collapsed pref. Toggled by clicking the section header.
+  applyCollapsedAll(collapsed) {
+    for (let rec of this.openRecs()) {
+      try { if (rec.wrap) rec.wrap.classList.toggle("zon-collapsed", !!collapsed); } catch (e) {}
     }
   },
 

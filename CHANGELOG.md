@@ -14,12 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was kept, so edits never showed). New annotations still appear in Zotero order
   and removed ones drop; free prose written *after* the last annotation is
   preserved. To hand-curate and freeze a block against resync, set `sync=off`.
-- **Duplicate section header removed.** Recent Zotero renders its own native
-  collapsible-section head (logo + "Obsidian Notes" + twisty), so the plugin's
-  custom header bar was showing as a second, redundant heading. The custom header
-  (and its separate collapse state) is gone; the native head is used.
+- **Duplicate section header removed.** Zotero dumps a plugin section's label as a
+  bare, unstyled text node (it does *not* build a native styled head for custom
+  sections), so it showed as a second, plain "Obsidian Notes" beneath our styled
+  one. The bare dump is now suppressed (empty label + strip), leaving a single
+  header — our crystal logo, muted-bold title, and collapse chevron, matching the
+  native Tags/Related heads.
 
 ### Changed
+- **Toolbar tidied.** *Update* (was *Refresh*), *Open in Obsidian*, and *Reload*
+  now share one row.
 - **"⋯ More" menu is now opt-in.** The advanced/early actions (*Sync Metadata*,
   *Migrate*, *Push tags → Zotero*) are hidden by default to keep the toolbar tidy.
   Turn them on with **Settings → Enable experimental features** (reopen the item
