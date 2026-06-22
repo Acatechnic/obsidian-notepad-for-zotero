@@ -23,6 +23,16 @@ export default defineConfig({
       // in the environment (e.g. `GITHUB_TOKEN=$(gh auth token) npm run release`).
       enable: "local",
     },
+    bumpp: {
+      // After bumpp writes the new version (and before it commits/tags/pushes):
+      // rewrite the README's version-pinned .xpi links, then build. `all: true`
+      // makes the release commit include the README change alongside the version
+      // files. (Until we ship a stable, non-prerelease v1.0.0, GitHub's permanent
+      // /releases/latest/download/ URL 404s, so the README must pin the version —
+      // sync-version keeps it current. See scripts/sync-readme-version.mjs.)
+      execute: "npm run sync-version && npm run build",
+      all: true,
+    },
   },
 
   build: {
