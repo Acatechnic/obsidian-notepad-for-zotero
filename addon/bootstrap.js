@@ -2162,9 +2162,14 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
 
   // Copy the cached PNG for each image annotation into the note's attachment
   // folder (vault-relative), so the `![[…]]` embeds resolve in Obsidian. Returns
-  // the count exported. Idempotent: skips files already present. No-op when the
-  // vault path is unset. Naming/embeds are produced in gatherAnnotations; this
-  // just realises the files. (Image/area annotations only — ink is deferred.)
+  // the count exported. No-op when the vault path is unset. Naming/embeds are
+  // produced in gatherAnnotations; this just realises the files. (Image/area
+  // annotations only — ink is deferred.)
+  //
+  // Re-copies when the cached image actually changed: resizing/moving an image
+  // annotation keeps the same key (so same filename) but Zotero regenerates the
+  // cache PNG, so we compare size + mtime and overwrite a stale copy. Unchanged
+  // files are skipped, so a plain re-sync is still idempotent.
   async exportAnnotationImages(anns, citekey, folder, win) {
     let imgs = (anns || []).filter((a) => a.type === "image" && a.imageBaseName && a._annotationID != null);
     if (!imgs.length) return 0;
@@ -2178,7 +2183,16 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
         let src = await Zotero.Annotations.getCacheImagePath(Zotero.Items.get(a._annotationID));
         if (!src || !(await IOUtils.exists(src))) continue;
         let dest = PathUtils.join(dir, a.imageBaseName);
-        if (await IOUtils.exists(dest)) { n++; continue; }
+        // Skip only when an identical copy already exists (same size, and the
+        // source isn't newer). Otherwise (missing, resized/moved → regenerated
+        // cache) re-copy so the embedded image stays in step.
+        let fresh = false;
+        try {
+          let s = await IOUtils.stat(src);
+          let d = await IOUtils.stat(dest); // throws if dest doesn't exist
+          fresh = d.size === s.size && d.lastModified >= s.lastModified;
+        } catch (e) { fresh = false; }
+        if (fresh) { n++; continue; }
         await IOUtils.makeDirectory(dir, { ignoreExisting: true, createAncestors: true });
         await IOUtils.copy(src, dest);
         n++;
