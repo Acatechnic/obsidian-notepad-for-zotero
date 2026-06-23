@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Templates refresh without a restart.** When you edit or add a template in
+  another app and switch back to Zotero, the plugin re-reads the templates
+  folder: edited template content is used by the next Insert, and added/renamed/
+  removed templates update the Insert dropdown automatically. (Previously the
+  template list was read only at startup.)
+
 ## [1.0.0-beta.11] — 2026-06-23
 
 ### Added

@@ -277,7 +277,10 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
       let self = this, t = null;
       win._zonFocusHandler = function () {
         try { if (t) win.clearTimeout(t); } catch (e) {}
-        t = win.setTimeout(function () { self.checkExternalChanges().catch(function () {}); }, 200);
+        t = win.setTimeout(function () {
+          self.checkExternalChanges().catch(function () {});
+          self.refreshTemplates().catch(function () {});
+        }, 200);
       };
       win.addEventListener("focus", win._zonFocusHandler, true);
     } catch (e) { this.log("watchWindowFocus failed: " + e); }
@@ -293,6 +296,24 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
         if (rec.timer) this.showConflict(rec); // unsaved edits → ask, don't clobber
         else await this.reload(rec, win);        // clean → silently pull the new version
       } catch (e) {}
+    }
+  },
+
+  // Re-read the templates folder so edits/additions made in another app show up
+  // without restarting Zotero. Called on window focus (the natural moment: you
+  // edit a template file elsewhere, then switch back to Zotero). Content edits
+  // are picked up silently — the next Insert resolves from the refreshed set;
+  // when the set of template NAMES changes (added/renamed/removed) the open
+  // pickers are repopulated too, so the dropdown stays current. Repopulating
+  // only on a name change avoids resetting a manually-chosen colour/sync on
+  // every alt-tab (populating re-applies the template's default colour/sync).
+  async refreshTemplates() {
+    let before = Object.keys(this._templates || {}).sort().join("\n");
+    try { await this.loadTemplates(); } catch (e) { return; }
+    let after = Object.keys(this._templates || {}).sort().join("\n");
+    if (before === after) return;
+    for (let rec of this.openRecs()) {
+      try { await this.populateTemplatePicker(rec); } catch (e) {}
     }
   },
 
