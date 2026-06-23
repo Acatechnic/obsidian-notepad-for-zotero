@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`{{dateAdded}}` and `{{dateModified}}` template variables** — the Zotero
+  "Date Added" / "Date Modified" timestamps (as `YYYY-MM-DD`), usable in
+  whole-note and `kind=field` templates.
+- **Settings-pane icon** — the Obsidian Notepad crystal logo now appears next to
+  the plugin in Zotero → Settings.
+
 ## [1.0.0-beta.10] — 2026-06-22
 
 ### Changed

@@ -67,10 +67,18 @@ export function buildItemData(item, opts = {}) {
   const f = (k) => {
     try { return (item.getField && item.getField(k)) || ""; } catch (e) { return ""; }
   };
+  // Zotero stores dateAdded/dateModified as UTC SQL datetimes
+  // ("2023-01-15 14:30:00"); expose just the YYYY-MM-DD for clean templates.
+  const dateOnly = (v) => {
+    const m = String(v || "").match(/^(\d{4}-\d{2}-\d{2})/);
+    return m ? m[1] : String(v || "");
+  };
   return {
     citekey: opts.citekey || "",
     title: f("title"),
     date: f("date"),
+    dateAdded: dateOnly(f("dateAdded")),
+    dateModified: dateOnly(f("dateModified")),
     itemType: item.itemType || "",
     publicationTitle: journalFor(item, f) || "",
     desktopURI: zoteroSelectURI(item),

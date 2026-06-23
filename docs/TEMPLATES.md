@@ -41,9 +41,13 @@ Templates are written in **Nunjucks**.You have `{{ variable }}`,
 
 ### Variables in `note.md` and in a `kind=field` element (whole-item)
 
-`{{citekey}}`, `{{title}}`, `{{date}}`, `{{itemType}}`, `{{publicationTitle}}`,
-`{{abstractNote}}`, `{{bibliography}}`, `{{desktopURI}}`, `{{creators}}` (each has
-`.firstName` / `.lastName`), `{{allTags}}`.
+`{{citekey}}`, `{{title}}`, `{{date}}`, `{{dateAdded}}`, `{{dateModified}}`,
+`{{itemType}}`, `{{publicationTitle}}`, `{{abstractNote}}`, `{{bibliography}}`,
+`{{desktopURI}}`, `{{creators}}` (each has `.firstName` / `.lastName`),
+`{{allTags}}`.
+
+`{{dateAdded}}` and `{{dateModified}}` are the Zotero "Date Added" / "Date
+Modified" timestamps as `YYYY-MM-DD`.
 
 ---
 

@@ -191,6 +191,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
           pluginID: this.pluginID,
           src: this.rootURI + "content/preferences.xhtml",
           label: "Obsidian Notepad",
+          image: this.icon,
           scripts: [this.rootURI + "content/preferences.js"],
         });
       }
