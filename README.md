@@ -39,6 +39,9 @@ file on disk stays a clean, plain-markdown Obsidian note.
   markdown highlighting. Saves straight to the file in your vault.
 - **Sync PDF annotations into the note** as customisable **live blocks**. Re-syncs
   are *idempotent*: your prose and any frozen blocks are never touched.
+- **Group highlights by colour.** A note template can route each annotation colour
+  into its own section — yellow key passages here, blue follow-ups there — with the
+  `highlights(colour="…")` helper (try the built-in `note-by-colour` template).
 - **Image annotations too.** Area/image annotations are exported into your vault
   and embedded in the note (`![[…]]`) — and shown inline in the pane's reading view.
 - **Auto-sync (optional).** Turn it on and highlights flow into the open note as
@@ -88,7 +91,10 @@ Notes and annotation blocks are authored in **Nunjucks** (the same templating
 language as the popular Zotero-to-Obsidian export templates). A templates folder
 holds your whole-note scaffold (`note.md`) and any insertable annotation-block
 templates. Built-in block formats (`list`, `quote`, `callout`, `compact`) are
-always available even with no folder.
+always available even with no folder. A note template can also drop annotation
+blocks into specific sections — including one per colour — with
+`{{ highlights(colour="…") }}`. Edit or add a template in Obsidian and the change
+is picked up when you switch back to Zotero (no restart needed).
 
 See **[docs/TEMPLATES.md](docs/TEMPLATES.md)** for the full guide: the available
 variables, the optional `%%! … %%` template directive, a reference for the

@@ -17,7 +17,8 @@ There are two kinds of file here, distinguished only by name:
   template renders the item's annotations into a live block.
 
 You manage all of this from Obsidian: add a file → it shows up in the dropdown;
-edit a file → the new look applies on the next Insert/Update.
+edit a file → the new look applies on the next Insert/Update. Changes are picked
+up when you switch back to Zotero — no restart needed.
 
 ---
 

@@ -184,8 +184,12 @@ Two kinds of file, distinguished only by name:
   an *insertable block template*; it appears in the **Template** dropdown in the
   item pane and renders the item's annotations (or a field) into a live block.
 
+A note template can also route highlights into sections by colour with
+\`{{ highlights(colour="yellow") }}\` — see \`note-by-colour.md\` for an example.
+
 Templates are written in **Nunjucks**. Add a file → it shows up in the dropdown;
 delete one → it disappears (the plugin's built-in copy still works as a fallback).
+Changes are picked up when you switch back to Zotero — no restart needed.
 Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/main/docs/TEMPLATES.md
 `,
 
