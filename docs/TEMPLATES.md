@@ -39,16 +39,36 @@ Templates are written in **Nunjucks**.You have `{{ variable }}`,
 | `{{type}}`      | `highlight`, `underline`, `image`, `note` (ink isn't rendered) |
 | `{{citekey}}`   | the item's citekey                                     |
 | `{{imageBaseName}}` | filename for an image annotation                   |
+| `{{tags}}`      | the **highlight's own** tags, as a list (loop/filter it) |
+| `{{tagList}}`   | the same tags as a comma-joined string                 |
+
+`{{tags}}` is the annotation's *own* tags (the ones you add to a highlight in the
+Zotero reader), distinct from the item-level `{{allTags}}` in a note template. Use
+it to carry per-highlight role markers into the note — e.g. tag highlights
+`method` / `finding` / `quote` and render or filter on them:
+
+```nunjucks
+%%! sync=on %%
+> {{text}}{% if tags %} {% for t in tags %}#{{t}} {% endfor %}{% endif %}
+> — [p.{{page}}]({{link}})
+```
 
 ### Variables in `note.md` and in a `kind=field` element (whole-item)
 
 `{{citekey}}`, `{{title}}`, `{{date}}`, `{{dateAdded}}`, `{{dateModified}}`,
 `{{itemType}}`, `{{publicationTitle}}`, `{{abstractNote}}`, `{{bibliography}}`,
-`{{desktopURI}}`, `{{creators}}` (each has `.firstName` / `.lastName`),
-`{{allTags}}`.
+`{{desktopURI}}`, `{{openPdf}}`, `{{creators}}` (each has `.firstName` /
+`.lastName`), `{{allTags}}`.
 
 `{{dateAdded}}` and `{{dateModified}}` are the Zotero "Date Added" / "Date
-Modified" timestamps as `YYYY-MM-DD`.
+Modified" timestamps as `YYYY-MM-DD`. (These are whole-item variables — they
+work in `note.md` and `kind=field` elements, **not** inside a per-annotation
+block, whose context is the highlight, not the item.)
+
+`{{desktopURI}}` is a `zotero://select/…` link that highlights the item in the
+Zotero **Library**; `{{openPdf}}` is a `zotero://open-pdf/…` link that opens the
+item's PDF in the **reader** (empty when the item has no PDF, so guard it with
+`{% if openPdf %}`). For example: `[Open PDF]({{openPdf}})`.
 
 ---
 

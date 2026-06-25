@@ -84,6 +84,10 @@ function annotationContext(a, opts) {
     link: pdfLink(a),
     citekey: opts.citekey || "",
     imageBaseName: a.imageBaseName || "",
+    // The highlight's OWN tags (role markers like method/finding/quote), as a
+    // list to loop/filter, plus a comma-joined string for the simple case.
+    tags: a.tags || [],
+    tagList: (a.tags || []).join(", "),
     attachmentFolder: opts.attachmentFolder || "References/Attachments",
   };
 }

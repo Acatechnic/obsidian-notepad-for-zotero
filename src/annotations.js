@@ -16,11 +16,24 @@ import { hexToColorName } from "./colors.js";
 const ATTACH_FOLDER_DEFAULT = "References/Attachments";
 
 // A Zotero annotation, as the (future) Zotero adapter will hand it to us:
-//   { key, type, annotatedText, comment, pageLabel, pageIndex, attachmentKey, imageBaseName, sortIndex }
+//   { key, type, annotatedText, comment, pageLabel, pageIndex, attachmentKey, imageBaseName, tags, sortIndex }
 // type is one of: highlight | underline | image | ink | text | note
 
 function esc(s) {
   return String(s == null ? "" : s).replace(/\s+/g, " ").trim();
+}
+
+// The annotation's OWN tags (highlight-level, distinct from the parent item's
+// tags). A Zotero annotation is an item, so it exposes getTags() → [{tag,type}].
+// Test fixtures pass a plain `tags` array instead. Return a clean string[].
+function extractTags(a) {
+  let raw = [];
+  if (a && typeof a.getTags === "function") raw = a.getTags() || [];
+  else if (a && Array.isArray(a.tags)) raw = a.tags;
+  return raw
+    .map((t) => (t && typeof t === "object" ? t.tag : t))
+    .filter((s) => s != null && String(s).trim() !== "")
+    .map((s) => String(s).trim());
 }
 
 export function pdfLink(a) {
@@ -109,6 +122,7 @@ export function mapZoteroAnnotation(a, attachmentKey) {
     color: a.annotationColor || "",
     colourName: hexToColorName(a.annotationColor),
     imageBaseName: a.imageBaseName || "",
+    tags: extractTags(a),
     sortIndex: a.annotationSortIndex || "",
   };
 }

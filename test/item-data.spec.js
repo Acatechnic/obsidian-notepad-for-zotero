@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { buildItemData, filenameFields, zoteroSelectURI, ensureZoteroLink } from "../src/item-data.js";
+import { buildItemData, filenameFields, zoteroSelectURI, zoteroOpenPdfURI, ensureZoteroLink } from "../src/item-data.js";
 import { render } from "../src/render.js";
 
 const TEMPLATE = readFileSync(
@@ -48,6 +48,23 @@ describe("buildItemData (Zotero item -> template data)", () => {
     item.library = { libraryType: "group" };
     item.libraryID = 99;
     expect(buildItemData(item, {}).desktopURI).toBe("zotero://select/groups/99/items/3FWSQYCT");
+  });
+
+  it("builds an open-pdf link when a PDF attachment key is supplied", () => {
+    const d = buildItemData(mockItem(), { citekey: "x", pdfAttachmentKey: "PDFKEY99" });
+    expect(d.openPdf).toBe("zotero://open-pdf/library/items/PDFKEY99");
+  });
+
+  it("leaves openPdf empty when the item has no PDF (no key passed)", () => {
+    expect(buildItemData(mockItem(), { citekey: "x" }).openPdf).toBe("");
+  });
+
+  it("builds a group-library open-pdf link in a group", () => {
+    const item = mockItem();
+    item.library = { libraryType: "group" };
+    item.libraryID = 42;
+    expect(zoteroOpenPdfURI(item, "PDFKEY99")).toBe("zotero://open-pdf/groups/42/items/PDFKEY99");
+    expect(zoteroOpenPdfURI(item, "")).toBe(""); // no attachment → empty
   });
 
   it("picks the right 'journal' field per item type", () => {

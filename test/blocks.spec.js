@@ -248,6 +248,46 @@ describe("custom (user-supplied) formats", () => {
   });
 });
 
+describe("per-annotation tags variable", () => {
+  // Highlight-level tags (role markers like method/finding/quote) added in the
+  // Zotero reader, distinct from the item's own tags.
+  const TAGGED = [
+    { key: "A", type: "highlight", attachmentKey: "PDF", pageLabel: "3", pageIndex: 3, sortIndex: "1", annotatedText: "a claim", comment: "", colourName: "yellow", tags: ["finding", "method"] },
+    { key: "B", type: "highlight", attachmentKey: "PDF", pageLabel: "5", pageIndex: 5, sortIndex: "2", annotatedText: "a quote", comment: "", colourName: "yellow", tags: ["quote"] },
+    { key: "C", type: "highlight", attachmentKey: "PDF", pageLabel: "7", pageIndex: 7, sortIndex: "3", annotatedText: "untagged", comment: "", colourName: "yellow", tags: [] },
+  ];
+
+  it("exposes {{tags}} as a loopable list of the highlight's own tags", () => {
+    const formats = { roles: { item: "- {{text}}{% for t in tags %} #{{t}}{% endfor %}", sep: "\n" } };
+    const body = renderBlockBody({ colour: "all", format: "roles" }, TAGGED, { formats });
+    expect(body).toContain("- a claim #finding #method");
+    expect(body).toContain("- a quote #quote");
+    expect(body).toContain("- untagged %% ann:C %%"); // no tags → nothing appended before the anchor
+    expect(body).not.toContain("untagged #");
+  });
+
+  it("exposes {{tagList}} as a comma-joined string", () => {
+    const formats = { csv: { item: "{{text}} [{{tagList}}]", sep: "\n" } };
+    const body = renderBlockBody({ colour: "all", format: "csv" }, TAGGED, { formats });
+    expect(body).toContain("a claim [finding, method]");
+    expect(body).toContain("untagged []");
+  });
+
+  it("can filter highlights by their own tag inside a template", () => {
+    const formats = { quotesOnly: { item: "{% if 'quote' in tags %}> {{text}}{% endif %}", sep: "\n" } };
+    const body = renderBlockBody({ colour: "all", format: "quotesOnly" }, TAGGED, { formats });
+    expect(body).toContain("> a quote");
+    expect(body).not.toContain("a claim");
+  });
+
+  it("defaults to an empty list when an annotation carries no tags field", () => {
+    const formats = { roles: { item: "- {{text}}{% for t in tags %} #{{t}}{% endfor %}", sep: "\n" } };
+    const noTagField = [{ key: "X", type: "highlight", attachmentKey: "PDF", pageLabel: "1", pageIndex: 1, sortIndex: "1", annotatedText: "plain", colourName: "yellow" }];
+    expect(() => renderBlockBody({ colour: "all", format: "roles" }, noTagField, { formats })).not.toThrow();
+    expect(renderBlockBody({ colour: "all", format: "roles" }, noTagField, { formats })).toContain("- plain");
+  });
+});
+
 describe("migrateLegacyAnnotations", () => {
   const legacy = `---
 citekey: x

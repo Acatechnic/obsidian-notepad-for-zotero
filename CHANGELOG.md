@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Per-annotation tags in block templates.** A highlight's own tags (the ones
+  you add to an annotation in the Zotero reader, e.g. `method` / `finding` /
+  `quote`) are now available inside a block template as `{{tags}}` (a list to
+  loop or filter) and `{{tagList}}` (a comma-joined string) — distinct from the
+  item-level `{{allTags}}`. Lets you carry per-highlight role markers into the
+  note. See docs/TEMPLATES.md.
+- **`{{openPdf}}` template variable.** A whole-item variable (for `note.md` and
+  `kind=field` elements) holding a `zotero://open-pdf/…` link that opens the
+  item's PDF in Zotero's reader — complementing `{{desktopURI}}`, which only
+  selects the item in the Library. Empty when the item has no PDF, so guard with
+  `{% if openPdf %}`.
+
 ## [1.0.0-beta.13] — 2026-06-23
 
 ### Added

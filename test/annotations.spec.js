@@ -86,6 +86,27 @@ describe("mapZoteroAnnotation (Zotero annotation item -> our shape)", () => {
     expect(m.pageIndex).toBe(0);
   });
 
+  it("extracts the annotation's own tags via getTags() (Zotero item shape)", () => {
+    const z = {
+      key: "T1", annotationType: "highlight", annotationText: "x", annotationPosition: "{}",
+      getTags: () => [{ tag: "method", type: 0 }, { tag: "finding", type: 1 }],
+    };
+    expect(mapZoteroAnnotation(z, "ATT").tags).toEqual(["method", "finding"]);
+  });
+
+  it("falls back to a plain tags array and drops blank entries", () => {
+    const m = mapZoteroAnnotation(
+      { key: "T2", annotationType: "highlight", annotationText: "x", annotationPosition: "{}", tags: ["quote", "", "  ", " keep "] },
+      "ATT"
+    );
+    expect(m.tags).toEqual(["quote", "keep"]);
+  });
+
+  it("defaults tags to an empty array when the annotation has none", () => {
+    const m = mapZoteroAnnotation({ key: "T3", annotationType: "highlight", annotationText: "x", annotationPosition: "{}" }, "ATT");
+    expect(m.tags).toEqual([]);
+  });
+
   it("renders Zotero sortIndex order correctly via the string comparator", () => {
     const anns = [
       mapZoteroAnnotation({ key: "B", annotationType: "highlight", annotationText: "b", annotationSortIndex: "00002|0|0", annotationPosition: "{}" }, "A"),

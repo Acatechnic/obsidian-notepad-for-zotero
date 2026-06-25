@@ -26,6 +26,18 @@ export function zoteroSelectURI(item) {
     : `zotero://select/library/items/${item.key}`;
 }
 
+// A deep link that OPENS the item's PDF in Zotero's reader (vs. zoteroSelectURI,
+// which only highlights the item in the Library). Needs the PDF attachment's key
+// — the plugin resolves the primary PDF attachment and passes it in. Returns ""
+// when the item has no PDF, so templates can guard with `{% if openPdf %}`.
+export function zoteroOpenPdfURI(item, attachmentKey) {
+  if (!attachmentKey) return "";
+  const isGroup = item.library && item.library.libraryType === "group";
+  return isGroup
+    ? `zotero://open-pdf/groups/${item.libraryID}/items/${attachmentKey}`
+    : `zotero://open-pdf/library/items/${attachmentKey}`;
+}
+
 // Ensure a created note carries a durable `ZoteroLink` (the item KEY) so it stays
 // linked even if the citekey/filename later changes — the item key never does. A
 // whole-note scaffold usually renders its own ZoteroLink, so this is a no-op when
@@ -82,6 +94,7 @@ export function buildItemData(item, opts = {}) {
     itemType: item.itemType || "",
     publicationTitle: journalFor(item, f) || "",
     desktopURI: zoteroSelectURI(item),
+    openPdf: zoteroOpenPdfURI(item, opts.pdfAttachmentKey),
     bibliography: opts.bibliography || "",
     abstractNote: f("abstractNote"),
     allTags: tagString(item, opts),
