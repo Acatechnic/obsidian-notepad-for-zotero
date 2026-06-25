@@ -132,6 +132,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A re-exported image (e.g. an annotation **resized/moved** — same filename, new
   content) now reloads in the pane via a cache-bust token, instead of showing the
   stale picture until the tab is closed and reopened.
+- **LLM `context="fulltext"` support.** `{% llm context="fulltext" %}…{% endllm %}`
+  blocks now resolve using the primary PDF's extracted full text (when available).
+  Contexts `abstract`, `annotations`, and `fulltext` are all first-class runnable
+   contexts; multiple comma-separated contexts per block are now supported (labeled sections, combined `maxContextChars` limit, all-or-nothing missing-context semantics).
+- **New built-in `research-questions` template.** Pre-fills a paper's research
+  questions via a `{% llm context="fulltext" %}` block. See
+  [docs/TEMPLATES.md](docs/TEMPLATES.md).
+
+### Changed
+- **Max Context Characters is now enforced.** The `llmMaxContextChars` preference
+  (Settings → LLM Interpreter → Max Context Characters) now acts as a hard
+  pre-flight limit — runs whose context text exceeds the configured value fail
+  with a `CONTEXT_TOO_LARGE` error rather than silently sending oversized input.
 
 ## [1.0.0-beta.6] — 2026-06-22
 

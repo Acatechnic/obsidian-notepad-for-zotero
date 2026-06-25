@@ -34,6 +34,37 @@ function PersistExtension() {
   };
 }
 
+// `{% llm context="..." %} ... {% endllm %}` -> renders body, then reconstructs an LLM
+// wrapper so the merging layer can find it later. Note: the wrapper is normalized
+// to `{% llm context="..." %}\n...\n{% endllm %}` (it is not byte-for-byte identical
+// to the author's original tag formatting). The template author writes a prompt as
+// the block body; this extension renders it (resolving {{variables}}) then wraps
+// the result back in `{% llm %}` / `{% endllm %}` tags so the final merged note
+// retains the prompt structure.
+function LLMExtension() {
+  this.tags = ["llm"];
+  this.parse = function (parser, nodes) {
+    const tok = parser.nextToken();
+    const args = parser.parseSignature(null, true);
+    parser.advanceAfterBlockEnd(tok.value);
+    const body = parser.parseUntilBlocks("endllm");
+    parser.advanceAfterBlockEnd();
+    return new nodes.CallExtension(this, "run", args, [body]);
+  };
+  this.run = function (_context, ...rest) {
+    const body = rest[rest.length - 1];
+    const renderedBody = typeof body === "function" ? body() : String(body || "");
+    let context = "";
+    for (let i = 0; i < rest.length - 1; i++) {
+      const a = rest[i];
+      if (a && typeof a === "object" && typeof a.context === "string") context = a.context;
+      else if (typeof a === "string" && a) context = a;
+    }
+    const raw = `{% llm context="${context}" %}\n${renderedBody}\n{% endllm %}`;
+    return new nunjucks.runtime.SafeString(raw);
+  };
+}
+
 export function makeEnv() {
   const env = new nunjucks.Environment(null, {
     autoescape: false, // markdown, not HTML
@@ -42,6 +73,7 @@ export function makeEnv() {
   });
 
   env.addExtension("PersistExtension", new PersistExtension());
+  env.addExtension("LLMExtension", new LLMExtension());
 
   // {{ value | format("YYYY-MM-DD h:mm a") }}
   env.addFilter("format", (value, fmt) => {

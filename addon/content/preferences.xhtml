@@ -96,4 +96,80 @@
       </html:label>
     </html:div>
   </groupbox>
+
+  <groupbox>
+    <label><html:h2>LLM Interpreter</html:h2></label>
+    <html:div style="display:flex;flex-direction:column;gap:12px;padding:8px;">
+      <!-- Base URL -->
+      <html:label style="display:flex;flex-direction:column;gap:3px;">
+        <html:span>Base URL (OpenAI-compatible)</html:span>
+        <html:input id="zon-llm-baseurl" type="text" style="flex:1;box-sizing:border-box;"
+          preference="extensions.zotero-obsidian-notes.llmBaseURL"/>
+        <html:span style="color:#888;font-size:11px;">OpenAI-compatible API base URL. Default: http://localhost:11434/v1 (Ollama)</html:span>
+      </html:label>
+
+      <!-- Model -->
+      <html:label style="display:flex;flex-direction:column;gap:3px;">
+        <html:span>Model</html:span>
+        <html:input id="zon-llm-model" type="text" style="flex:1;box-sizing:border-box;"
+          preference="extensions.zotero-obsidian-notes.llmModel"/>
+        <html:span style="color:#888;font-size:11px;">Model name (e.g., llama3, gpt-4o)</html:span>
+      </html:label>
+
+      <!-- API Key (optional) -->
+      <html:label style="display:flex;flex-direction:column;gap:3px;">
+        <html:span>API Key (optional)</html:span>
+        <html:input id="zon-llm-apikey" type="password" style="flex:1;box-sizing:border-box;"
+          preference="extensions.zotero-obsidian-notes.llmApiKey"/>
+        <html:span style="color:#888;font-size:11px;">Leave blank for local providers like Ollama</html:span>
+      </html:label>
+
+      <!-- Temperature -->
+      <html:label style="display:flex;flex-direction:column;gap:3px;">
+        <html:span>Temperature</html:span>
+        <html:input id="zon-llm-temperature" type="number" step="0.1" min="0" max="2" style="flex:1;box-sizing:border-box;"
+          preference="extensions.zotero-obsidian-notes.llmTemperature"/>
+        <html:span style="color:#888;font-size:11px;">0 = deterministic, 2 = creative (default: 0.2)</html:span>
+      </html:label>
+
+      <!-- Max Output Tokens -->
+      <html:label style="display:flex;flex-direction:column;gap:3px;">
+        <html:span>Max Output Tokens</html:span>
+        <html:input id="zon-llm-maxtokens" type="number" min="1" style="flex:1;box-sizing:border-box;"
+          preference="extensions.zotero-obsidian-notes.llmMaxTokens"/>
+        <html:span style="color:#888;font-size:11px;">Maximum tokens to generate (default: 2048)</html:span>
+      </html:label>
+
+      <!-- Max Context Characters -->
+      <html:label style="display:flex;flex-direction:column;gap:3px;">
+        <html:span>Max Context Characters</html:span>
+        <html:input id="zon-llm-maxcontext" type="number" min="1" style="flex:1;box-sizing:border-box;"
+          preference="extensions.zotero-obsidian-notes.llmMaxContextChars"/>
+        <html:span style="color:#888;font-size:11px;">Maximum characters of note context to send (default: 100000)</html:span>
+      </html:label>
+
+      <!-- Timeout -->
+      <html:label style="display:flex;flex-direction:column;gap:3px;">
+        <html:span>Timeout (seconds)</html:span>
+        <html:input id="zon-llm-timeout" type="number" min="1" style="flex:1;box-sizing:border-box;"
+          preference="extensions.zotero-obsidian-notes.llmTimeoutSeconds"/>
+        <html:span style="color:#888;font-size:11px;">Request timeout in seconds (default: 60)</html:span>
+      </html:label>
+
+      <!-- Auto-run checkbox -->
+      <html:label style="display:flex;align-items:flex-start;gap:8px;">
+        <html:input id="zon-llm-autorun" type="checkbox" preference="extensions.zotero-obsidian-notes.llmAutoRun"/>
+        <html:span style="display:flex;flex-direction:column;gap:3px;">
+          <html:span>Run LLM automatically on note create/insert</html:span>
+          <html:span style="color:#888;font-size:11px;">Requires base URL and model to be set</html:span>
+        </html:span>
+      </html:label>
+
+      <!-- Test LLM Connection button + result -->
+      <html:div style="display:flex;align-items:center;gap:8px;">
+        <html:button id="zon-llm-test" type="button">Test LLM connection</html:button>
+        <html:span id="zon-llm-test-result" style="font-size:11px;"></html:span>
+      </html:div>
+    </html:div>
+  </groupbox>
 </vbox>

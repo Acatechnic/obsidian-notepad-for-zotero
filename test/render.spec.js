@@ -29,3 +29,45 @@ describe("renderer", () => {
     expect(out).not.toContain("Imported:");
   });
 });
+
+describe("LLM block preservation", () => {
+  it("preserves an {% llm %} block around the rendered body", () => {
+    const out = render(
+      '{% llm context="abstract" %}Summarise {{title}}.{% endllm %}',
+      { title: "My Paper" }
+    );
+    expect(out).toContain('{% llm context="abstract" %}');
+    expect(out).toContain("{% endllm %}");
+    expect(out).toContain("Summarise My Paper.");
+  });
+
+  it("preserves a multi-context block", () => {
+    const out = render(
+      '{% llm context="abstract,annotations" %}prompt{% endllm %}',
+      {}
+    );
+    expect(out).toContain('context="abstract,annotations"');
+    expect(out).toContain("{% endllm %}");
+  });
+
+  it("preserves multiple LLM blocks in one template", () => {
+    const tpl = [
+      "Before",
+      '{% llm context="abstract" %}A{% endllm %}',
+      "Middle",
+      '{% llm context="fulltext" %}B{% endllm %}',
+      "After",
+    ].join("\n");
+    const out = render(tpl, {});
+    expect(out).toContain('context="abstract"');
+    expect(out).toContain('context="fulltext"');
+    expect(out).toContain("Before");
+    expect(out).toContain("After");
+  });
+
+  it("does not call any model (body is the prompt, preserved)", () => {
+    const out = render('{% llm context="abstract" %}prompt{% endllm %}', {});
+    expect(out).toMatch(/\{%\s*llm\s+context="abstract"\s*%\}/);
+    expect(out).toMatch(/\{%\s*endllm\s*%\}/);
+  });
+});

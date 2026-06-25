@@ -138,4 +138,84 @@
     });
   }
   populateDefaultNote();
+
+  // Wire the "Test LLM connection" button to call Zotero.ZON.testLLMConnection().
+  function wireLLMTest(tries) {
+    const testBtn = document.getElementById("zon-llm-test");
+    if (!testBtn) {
+      if ((tries || 0) < 40) window.setTimeout(() => wireLLMTest((tries || 0) + 1), 50);
+      return;
+    }
+    if (testBtn._zonWired) return;
+    testBtn._zonWired = true;
+    testBtn.addEventListener("click", async () => {
+      const resultEl = document.getElementById("zon-llm-test-result");
+      if (resultEl) { resultEl.textContent = "Testing…"; resultEl.style.color = "#888"; }
+      testBtn.disabled = true;
+      try {
+        const baseURLEl = document.getElementById("zon-llm-baseurl");
+        const modelEl = document.getElementById("zon-llm-model");
+        const apiKeyEl = document.getElementById("zon-llm-apikey");
+        const tempEl = document.getElementById("zon-llm-temperature");
+        const maxTokensEl = document.getElementById("zon-llm-maxtokens");
+        const maxContextEl = document.getElementById("zon-llm-maxcontext");
+        const timeoutEl = document.getElementById("zon-llm-timeout");
+        const autoRunEl = document.getElementById("zon-llm-autorun");
+        const settings = {
+          baseURL: baseURLEl ? baseURLEl.value : "",
+          model: modelEl ? modelEl.value : "",
+          apiKey: apiKeyEl ? apiKeyEl.value : "",
+          temperature: tempEl ? parseFloat(tempEl.value) : 0.2,
+          maxTokens: maxTokensEl ? parseInt(maxTokensEl.value, 10) : 2048,
+          maxContextChars: maxContextEl ? parseInt(maxContextEl.value, 10) : 100000,
+          timeoutSeconds: timeoutEl ? parseInt(timeoutEl.value, 10) : 60,
+          autoRun: autoRunEl ? autoRunEl.checked : false,
+        };
+        const result = await Zotero.ZON.testLLMConnection(settings);
+        if (resultEl) {
+          resultEl.textContent = result.message;
+          resultEl.style.color = result.ok ? "#080" : "#c00";
+        }
+      } catch (e) {
+        if (resultEl) {
+          resultEl.textContent = "Test failed: " + (e && e.message ? e.message : String(e));
+          resultEl.style.color = "#c00";
+        }
+      } finally {
+        testBtn.disabled = false;
+      }
+    });
+  }
+  wireLLMTest();
+
+  // Gate the auto-run checkbox: disabled + unchecked when base URL or model is empty.
+  function wireLLMAutoRunGate(tries) {
+    const baseURLInput = document.getElementById("zon-llm-baseurl");
+    const modelInput = document.getElementById("zon-llm-model");
+    const autoRunChk = document.getElementById("zon-llm-autorun");
+    if (!baseURLInput || !modelInput || !autoRunChk) {
+      if ((tries || 0) < 40) window.setTimeout(() => wireLLMAutoRunGate((tries || 0) + 1), 50);
+      return;
+    }
+    if (autoRunChk._zonGated) return;
+    autoRunChk._zonGated = true;
+
+    function updateGate() {
+      const configured = !!(baseURLInput.value.trim() && modelInput.value.trim());
+      if (!configured) {
+        autoRunChk.disabled = true;
+        if (autoRunChk.checked) {
+          autoRunChk.checked = false;
+          try { Zotero.Prefs.set(PREFIX + "llmAutoRun", false, true); } catch (e) {}
+        }
+      } else {
+        autoRunChk.disabled = false;
+      }
+    }
+
+    baseURLInput.addEventListener("input", updateGate);
+    modelInput.addEventListener("input", updateGate);
+    updateGate();
+  }
+  wireLLMAutoRunGate();
 }

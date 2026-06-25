@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseTemplateFile } from "../src/templates.js";
+import { parseTemplateFile, templateKind } from "../src/templates.js";
 import { renderBlockBody } from "../src/blocks.js";
 
 describe("parseTemplateFile", () => {
@@ -43,5 +43,20 @@ describe("parseTemplateFile", () => {
       formats: { t: { item: t.item, sep: t.sep } },
     });
     expect(out).toBe(`- "hello" (p.3) %% ann:K1 %%`); // only the yellow one, anchored (A2)
+  });
+});
+
+describe("templateKind with LLM blocks", () => {
+  it("classifies a template with an LLM block as document", () => {
+    expect(templateKind('{% llm context="abstract" %}x{% endllm %}')).toBe("document");
+  });
+
+  it("classifies a plain per-annotation format as format", () => {
+    expect(templateKind("> {{text}}")).toBe("format");
+  });
+
+  it("LLM block beats format-only body (no frontmatter, no zon)", () => {
+    const t = "- {{text}}\n{% llm context=\"abstract\" %}p{% endllm %}";
+    expect(templateKind(t)).toBe("document");
   });
 });

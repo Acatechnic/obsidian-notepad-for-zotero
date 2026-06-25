@@ -75,18 +75,43 @@ export function renderAnnotationLine(a, opts = {}) {
 // Render the body of the `## Annotations` section: one block per annotation, in
 // Zotero sort order, separated by blank lines. (No per-import "Imported:"
 // heading — that is what proliferates in the mgmeyers flow.)
-export function renderAnnotationsSection(annotations, opts = {}) {
-  // Zotero's annotationSortIndex is a fixed-width, zero-padded string built for
-  // lexical ordering — so compare as strings, falling back to key.
-  const sorted = [...(annotations || [])].sort((x, y) => {
+function sortAnnotations(annotations) {
+  return [...(annotations || [])].sort((x, y) => {
     const sx = String(x.sortIndex ?? ""), sy = String(y.sortIndex ?? "");
     if (sx !== sy) return sx < sy ? -1 : 1;
     return String(x.key).localeCompare(String(y.key));
   });
+}
+
+export function renderAnnotationsSection(annotations, opts = {}) {
+  const sorted = sortAnnotations(annotations);
   const lines = sorted.map((a) => renderAnnotationLine(a, opts)).filter(Boolean);
   return lines.join("\n\n");
 }
 
+// LLM-context formatter — a DIFFERENT concern from the note-rendering
+// functions above: produces clean structured markdown for an LLM prompt,
+// with NO `%% ann:KEY %%` anchors and NO `![[…]]` embeds. Image-only
+// annotations (no text AND no comment) are omitted. Returns "" when no
+// usable annotations remain (caller treats that as CONTEXT_MISSING).
+export function renderAnnotationsContext(annotations) {
+  const usable = sortAnnotations(annotations)
+    .filter((a) => esc(a.annotatedText) !== "" || esc(a.comment) !== "");
+  if (usable.length === 0) return "";
+  const blocks = usable.map((a) => {
+    const page = esc(a.pageLabel) || (a.pageIndex != null ? String(a.pageIndex + 1) : "");
+    const colour = esc(a.colourName);
+    const type = String(a.type || "");
+    const header = `### p.${page || "?"} — ${type}${colour ? ` (${colour})` : ""}`;
+    const parts = [header];
+    const text = esc(a.annotatedText);
+    if (text) parts.push(`> "${text}"`);
+    const comment = esc(a.comment);
+    if (comment) parts.push(`Comment: ${comment}`);
+    return parts.join("\n\n");
+  });
+  return blocks.join("\n\n");
+}
 // Map a Zotero annotation item to the shape renderAnnotationLine consumes.
 // Pure: pass an annotation-like object (the fields Zotero exposes) plus its
 // parent PDF attachment key. annotationPosition is JSON holding the pageIndex.

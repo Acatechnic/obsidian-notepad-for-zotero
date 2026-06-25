@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderAnnotationsSection, renderAnnotationLine, mapZoteroAnnotation } from "../src/annotations.js";
+import { renderAnnotationsSection, renderAnnotationLine, mapZoteroAnnotation, renderAnnotationsContext } from "../src/annotations.js";
 import { mergeNote } from "../src/merge.js";
 
 const ANNS = [
@@ -127,5 +127,114 @@ describe("annotations merge end-to-end", () => {
     for (const k of ["HXQBPCWS", "AB12CD34", "NOTE0001"]) {
       expect((after.match(new RegExp(`ann:${k} `, "g")) || []).length).toBe(1);
     }
+  });
+});
+
+describe("renderAnnotationsContext (LLM context formatter)", () => {
+  const HIGHLIGHT_WITH_COLOUR = {
+    key: "ANN001", type: "highlight", attachmentKey: "ATT",
+    pageLabel: "3", pageIndex: 2, sortIndex: 1,
+    annotatedText: "networks shape cognition", comment: "central claim",
+    colourName: "yellow",
+  };
+
+  const IMAGE_WITH_COMMENT = {
+    key: "ANN003", type: "image", attachmentKey: "ATT",
+    pageLabel: "9", pageIndex: 8, sortIndex: 3,
+    annotatedText: "", comment: "this figure shows the topology",
+    colourName: "blue",
+    imageBaseName: "fig1.png",
+  };
+  const IMAGE_ONLY = {
+    key: "ANN004", type: "image", attachmentKey: "ATT",
+    pageLabel: "10", pageIndex: 9, sortIndex: 4,
+    annotatedText: "", comment: "",
+    colourName: "",
+    imageBaseName: "fig2.png",
+  };
+  const TEXT_WITH_COMMENT = {
+    key: "ANN005", type: "text", attachmentKey: "ATT",
+    pageLabel: "7", pageIndex: 6, sortIndex: 5,
+    annotatedText: "", comment: "follow up on this method",
+    colourName: "",
+  };
+
+  it("produces structured markdown with header, quote, and comment", () => {
+    const result = renderAnnotationsContext([HIGHLIGHT_WITH_COLOUR]);
+    expect(result).toBe(
+      '### p.3 — highlight (yellow)\n\n' +
+      '> "networks shape cognition"\n\n' +
+      'Comment: central claim'
+    );
+  });
+
+  it("orders by sortIndex then key when input is out of order", () => {
+    const outOfOrder = [
+      { key: "B", type: "highlight", sortIndex: "3", pageLabel: "1", pageIndex: 0, annotatedText: "B text", comment: "", colourName: "", attachmentKey: "ATT" },
+      { key: "A", type: "highlight", sortIndex: "1", pageLabel: "1", pageIndex: 0, annotatedText: "A text", comment: "", colourName: "", attachmentKey: "ATT" },
+      { key: "C", type: "highlight", sortIndex: "2", pageLabel: "1", pageIndex: 0, annotatedText: "C text", comment: "", colourName: "", attachmentKey: "ATT" },
+    ];
+    const result = renderAnnotationsContext(outOfOrder);
+    expect(result.indexOf("A text")).toBeLessThan(result.indexOf("C text"));
+    expect(result.indexOf("C text")).toBeLessThan(result.indexOf("B text"));
+  });
+
+  it("includes Comment: line when comment is set", () => {
+    const result = renderAnnotationsContext([HIGHLIGHT_WITH_COLOUR]);
+    expect(result).toContain("Comment: central claim");
+  });
+
+  it("includes image annotation with comment (no blockquote, only header + Comment)", () => {
+    const result = renderAnnotationsContext([IMAGE_WITH_COMMENT]);
+    expect(result).toContain("### p.9 — image (blue)");
+    expect(result).toContain("Comment: this figure shows the topology");
+    expect(result).not.toContain('> "');
+  });
+
+  it("omits image-only annotation (empty text AND empty comment)", () => {
+    expect(renderAnnotationsContext([IMAGE_ONLY])).toBe("");
+  });
+
+  it("includes text/note annotation with only a comment (header + Comment)", () => {
+    const result = renderAnnotationsContext([TEXT_WITH_COMMENT]);
+    expect(result).toContain("### p.7 — text");
+    expect(result).toContain("Comment: follow up on this method");
+    expect(result).not.toContain('> "');
+  });
+
+  it("handles missing fields (no sortIndex, colourName, or pageLabel)", () => {
+    const a1 = {
+      key: "BB", type: "underline", attachmentKey: "ATT",
+      pageLabel: "", pageIndex: 2, sortIndex: undefined, colourName: undefined,
+      annotatedText: "second", comment: "",
+    };
+    const a2 = {
+      key: "AA", type: "highlight", attachmentKey: "ATT",
+      pageLabel: "", pageIndex: undefined, sortIndex: undefined, colourName: undefined,
+      annotatedText: "first", comment: "",
+    };
+    const result = renderAnnotationsContext([a1, a2]);
+    expect(result.indexOf("p.?")).toBeLessThan(result.indexOf("p.3"));
+    expect(result).toContain("### p.? — highlight");
+    expect(result).toContain("### p.3 — underline");
+    expect(result).not.toContain("(");
+  });
+
+  it("returns empty string for empty annotations array", () => {
+    expect(renderAnnotationsContext([])).toBe("");
+  });
+
+  it("returns empty string when all annotations are image-only", () => {
+    const result = renderAnnotationsContext([
+      IMAGE_ONLY,
+      { ...IMAGE_ONLY, key: "ANN006", sortIndex: 6 },
+    ]);
+    expect(result).toBe("");
+  });
+
+  it("output contains neither %% ann: nor ![[", () => {
+    const result = renderAnnotationsContext([HIGHLIGHT_WITH_COLOUR, IMAGE_WITH_COMMENT, TEXT_WITH_COMMENT]);
+    expect(result).not.toContain("%% ann:");
+    expect(result).not.toContain("![[");
   });
 });

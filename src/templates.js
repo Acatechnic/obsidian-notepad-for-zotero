@@ -16,6 +16,7 @@
 // runs in the privileged scope before the core bundle is guaranteed loaded. Keep
 // the two in sync; this copy is the Node-tested source of truth.
 import { parseConfig } from "./blocks.js";
+import { hasLLMBlocks } from "./llm-blocks.js";
 
 const DIRECTIVE_RE = /^\s*%%!\s*([^%]*?)\s*%%\s*$/;
 
@@ -52,6 +53,7 @@ export function templateKind(text) {
   const t = String(text || "");
   if (/^---\r?\n[\s\S]*?\r?\n---/.test(t)) return "document";
   if (/%%\s*zon\b/.test(t)) return "document";
+  if (hasLLMBlocks(t)) return "document";   // NEW — templates with LLM blocks are once-per-item
   return "format";
 }
 

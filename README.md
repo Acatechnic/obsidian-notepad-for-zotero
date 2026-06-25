@@ -57,6 +57,13 @@ file on disk stays a clean, plain-markdown Obsidian note.
 - **Safe by design.** Writes are atomic, and if a note changed on disk (e.g. you
   edited it in Obsidian) the plugin never silently overwrites it — it offers to
   reload or overwrite.
+- **LLM-assisted templates (BYOK).** Add a `{% llm context="fulltext" %}` block
+  to a template and the plugin asks your own OpenAI-compatible model (local
+  Ollama, OpenAI, LM Studio, …) to fill it in from the paper's abstract,
+  annotations, or full text. Combine contexts with a comma (e.g.
+  `context="abstract,annotations"`) to feed multiple sources at once. Bring your
+  own key/endpoint; runs are all-or-nothing with no silent fallback. See
+  [docs/TEMPLATES.md](docs/TEMPLATES.md).
 
 ## Requirements
 
