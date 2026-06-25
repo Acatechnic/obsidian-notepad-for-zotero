@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.14] — 2026-06-25
+
 ### Added
 - **Per-annotation tags in block templates.** A highlight's own tags (the ones
   you add to an annotation in the Zotero reader, e.g. `method` / `finding` /

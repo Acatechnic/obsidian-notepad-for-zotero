@@ -9,10 +9,10 @@ Zotero item pane** — and sync your PDF highlights into it as you read.
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/acatechnic)
 
-> Status: **public beta** (v1.0.0-beta.13). Cross-platform
+> Status: **public beta** (v1.0.0-beta.14). Cross-platform
 > (Windows / macOS / Linux), Zotero 7+, [AGPL-3.0](LICENSE).
 >
-> **Install:** download **[`obsidian-notepad-for-zotero.xpi`](https://github.com/Acatechnic/obsidian-notepad-for-zotero/releases/download/v1.0.0-beta.13/obsidian-notepad-for-zotero.xpi)**
+> **Install:** download **[`obsidian-notepad-for-zotero.xpi`](https://github.com/Acatechnic/obsidian-notepad-for-zotero/releases/download/v1.0.0-beta.14/obsidian-notepad-for-zotero.xpi)**
 > (or browse [all releases](https://github.com/Acatechnic/obsidian-notepad-for-zotero/releases)),
 > then in Zotero: Tools → Plugins → gear icon → *Install Plugin From File…*
 > It auto-updates after that.
@@ -68,7 +68,7 @@ file on disk stays a clean, plain-markdown Obsidian note.
 
 ## Install
 
-1. Download **[`obsidian-notepad-for-zotero.xpi`](https://github.com/Acatechnic/obsidian-notepad-for-zotero/releases/download/v1.0.0-beta.13/obsidian-notepad-for-zotero.xpi)**
+1. Download **[`obsidian-notepad-for-zotero.xpi`](https://github.com/Acatechnic/obsidian-notepad-for-zotero/releases/download/v1.0.0-beta.14/obsidian-notepad-for-zotero.xpi)**
    (latest beta) — or pick a build from [all releases](https://github.com/Acatechnic/obsidian-notepad-for-zotero/releases).
 2. In Zotero: **Tools → Plugins → gear menu → Install Plugin From File…** and choose the `.xpi`.
 3. That's it — the plugin **auto-updates** from GitHub Releases from then on.
