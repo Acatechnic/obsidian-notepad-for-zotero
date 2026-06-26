@@ -157,10 +157,16 @@ export function renderBlockBody(config, annotations, opts = {}) {
   const env = opts.env || makeEnv();
 
   if (kind !== "annotations") {
-    const tpl = formats[config.format] && formats[config.format].item;
-    if (tpl == null) return ""; // unknown template -> empty (don't invent content)
     const data = { citekey: opts.citekey || "", ...(opts.itemData || {}) };
     if (opts.citekey) data.citekey = opts.citekey;
+    // `var=<item field>` renders that single item variable (a custom field block
+    // for any field — `%% zon kind=field var=publisher %%`). Guarded to a plain
+    // identifier so the marker stays a safe, space-free token.
+    if (config.var && /^[A-Za-z0-9_]+$/.test(config.var)) {
+      return env.renderString("{{ " + config.var + " }}", data).replace(/\s+$/, "");
+    }
+    const tpl = formats[config.format] && formats[config.format].item;
+    if (tpl == null) return ""; // unknown template -> empty (don't invent content)
     return env.renderString(tpl, data).replace(/\s+$/, "");
   }
 

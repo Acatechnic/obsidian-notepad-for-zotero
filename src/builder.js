@@ -105,6 +105,34 @@ export function annotationBlockText(config) {
   return annotationMarkerOpen(config) + "\n%% /zon %%";
 }
 
+// Item fields that can become a custom updatable field block (`var=…`). Scalars
+// only (no spaces/loops) so the marker stays a clean token; the rich presets
+// (citation/abstract/title/authors) cover the formatted/looped cases.
+export const FIELD_VARS = [
+  ["title", "Title"], ["publicationTitle", "Journal / publication"], ["abstractNote", "Abstract"],
+  ["itemType", "Item type"], ["date", "Date"], ["dateAdded", "Date added"], ["dateModified", "Date modified"],
+  ["citekey", "Citekey"], ["bibliography", "Citation"], ["openPdf", "Open-PDF link"], ["desktopURI", "Zotero link"],
+];
+
+// An updatable field block for a single item variable.
+export function fieldBlockVarText(varId) {
+  const v = /^[A-Za-z0-9_]+$/.test(String(varId || "")) ? varId : "title";
+  return "%% zon kind=field var=" + v + " sync=on %%\n%% /zon %%";
+}
+
+// Route highlights by colour into one section each, via the highlights() helper —
+// for a whole-note template. opts = { colours:[names], format, headings }.
+export function colourRouteText(opts) {
+  const o = opts || {};
+  const colours = o.colours && o.colours.length ? o.colours : ["yellow"];
+  const format = o.format || "quote";
+  const headings = o.headings !== false;
+  return colours.map((c) => {
+    const head = headings ? "## " + c.charAt(0).toUpperCase() + c.slice(1) + "\n" : "";
+    return head + '{{ highlights(colour="' + c + '", format="' + format + '") }}';
+  }).join("\n\n") + "\n";
+}
+
 // ------------------------------------------------- frontmatter field builder
 //
 // The frontmatter panel ADDS a field (your key + a value source) and REMOVES a

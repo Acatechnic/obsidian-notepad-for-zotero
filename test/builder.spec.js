@@ -6,6 +6,7 @@ import {
   blockConfigAt, annotationMarkerOpen, annotationBlockText,
   FRONTMATTER_VALUES, frontmatterFieldText, frontmatterFieldKeys,
   addFrontmatterField, removeFrontmatterField,
+  FIELD_VARS, fieldBlockVarText, colourRouteText,
 } from "../src/builder.js";
 import { templateKind } from "../src/templates.js";
 import { composeFormat } from "../src/formats.js";
@@ -216,6 +217,50 @@ describe("annotation-block configurator engine", () => {
     expect(doc).toContain("colour=red");
     expect(doc).toContain("tag=finding");
     expect(blockConfigAt(doc, 5).config.colour).toBe("red"); // still parseable
+  });
+});
+
+describe("Tier 3: custom field blocks (var=) + colour routing", () => {
+  const ctx = { itemData: SAMPLE_ITEM, annotations: SAMPLE_ANNOTATIONS, citekey: SAMPLE_ITEM.citekey };
+
+  it("a var= field block renders that single item field, and refreshes", () => {
+    const blk = fieldBlockVarText("publicationTitle");
+    expect(blk).toBe("%% zon kind=field var=publicationTitle sync=on %%\n%% /zon %%");
+    const out = previewTemplate(blk, ctx);
+    expect(out.error).toBeFalsy();
+    expect(out.preview).toContain("Journal of Sample Studies");
+  });
+
+  it("var= falls back safely and rejects non-identifiers", () => {
+    expect(previewTemplate(fieldBlockVarText("title"), ctx).preview).toContain("A Worked Example");
+    expect(fieldBlockVarText("../evil")).toContain("var=title"); // sanitised
+  });
+
+  it("FIELD_VARS all render without error", () => {
+    for (const [id] of FIELD_VARS) {
+      const out = previewTemplate(fieldBlockVarText(id), ctx);
+      expect(out.error, id + ": " + out.raw).toBeFalsy();
+    }
+  });
+
+  it("colourRouteText routes each colour into its own section and fills them", () => {
+    const tpl = colourRouteText({ colours: ["yellow", "blue"], format: "quote", headings: true });
+    expect(tpl).toContain("## Yellow");
+    expect(tpl).toContain("## Blue");
+    expect(tpl).toContain('highlights(colour="yellow"');
+    const out = previewTemplate(tpl, ctx);
+    expect(out.error).toBeFalsy();
+    expect(out.raw).toContain("Coproduction reshapes");       // yellow highlight
+    expect(out.raw).toContain("a clean, quotable sentence");   // blue highlight
+    // yellow content sits under the Yellow heading, not the Blue one
+    const yi = out.raw.indexOf("## Yellow"), bi = out.raw.indexOf("## Blue");
+    expect(out.raw.slice(yi, bi)).toContain("Coproduction reshapes");
+  });
+
+  it("colourRouteText can omit headings", () => {
+    const tpl = colourRouteText({ colours: ["red"], headings: false });
+    expect(tpl).not.toContain("##");
+    expect(tpl).toContain('highlights(colour="red"');
   });
 });
 

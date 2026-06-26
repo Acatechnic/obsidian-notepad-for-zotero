@@ -272,6 +272,39 @@
       group("Item variables", Core.ITEM_VARIABLES || [], vText, vLabel);
     }
 
+    // Route highlights by colour → one highlights() section per colour.
+    function buildColourRoute() {
+      side.append(el("div", "b-pal-head", "Route highlights by colour"));
+      var st = { colours: [], format: "quote", headings: true };
+      var wrap = el("div", "b-pal-group");
+      (Core.BLOCK_COLOURS || []).forEach(function (col) {
+        var chip = el("button", "b-chip b-col", col);
+        chip.addEventListener("click", function () {
+          var i = st.colours.indexOf(col); if (i === -1) st.colours.push(col); else st.colours.splice(i, 1);
+          chip.classList.toggle("b-on");
+        });
+        wrap.append(chip);
+      });
+      side.append(wrap);
+      selectInto(side, "Format", formatNames.map(function (n) { return [n, n]; }), st.format, function (v) { st.format = v; });
+      var hLab = el("label", "b-check");
+      var hcb = doc.createElement("input"); hcb.type = "checkbox"; hcb.checked = true;
+      hcb.addEventListener("change", function () { st.headings = hcb.checked; });
+      hLab.append(hcb, el("span", null, "Heading per colour")); side.append(hLab);
+      var btn = el("button", "b-btn b-gen", "Insert colour-routed sections");
+      btn.addEventListener("click", function () { insert(Core.colourRouteText(st)); });
+      side.append(btn);
+    }
+    // Insert an updatable field block for any single item field.
+    function buildCustomFieldBlock() {
+      var box = el("div");
+      var sel = selectInto(box, "Custom field block (any field)", (Core.FIELD_VARS || []), (Core.FIELD_VARS && Core.FIELD_VARS[0] ? Core.FIELD_VARS[0][0] : "title"), function () {});
+      side.append(box);
+      var btn = el("button", "b-btn", "Insert field block");
+      btn.addEventListener("click", function () { insert(Core.fieldBlockVarText(sel.value)); });
+      side.append(btn);
+    }
+
     function selectRow(label, pairs, value, onSet) { var box = el("div"); side.append(box); return selectInto(box, label, pairs, value, onSet); }
     function selectInto(box, label, pairs, value, onSet) {
       box.append(el("div", "b-pal-head", label));
@@ -313,7 +346,9 @@
       } else {
         side.append(el("div", "b-pal-head", "Add annotation block"));
         buildConfigurator("add");
+        buildColourRoute();
         group("Updatable fields", Core.FIELD_BLOCKS || [], tText, tLabel);
+        buildCustomFieldBlock();
         group("Item variables", Core.ITEM_VARIABLES || [], vText, vLabel);
       }
     }
