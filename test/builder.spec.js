@@ -7,6 +7,7 @@ import {
   FRONTMATTER_VALUES, frontmatterFieldText, frontmatterFieldKeys,
   addFrontmatterField, removeFrontmatterField,
   FIELD_VARS, fieldBlockVarText, colourRouteText,
+  UPDATABLE_FIELDS, fieldBlockMarkerOpen, fieldBlockTextFor, fieldOptionId,
 } from "../src/builder.js";
 import { templateKind } from "../src/templates.js";
 import { composeFormat } from "../src/formats.js";
@@ -261,6 +262,37 @@ describe("Tier 3: custom field blocks (var=) + colour routing", () => {
     const tpl = colourRouteText({ colours: ["red"], headings: false });
     expect(tpl).not.toContain("##");
     expect(tpl).toContain('highlights(colour="red"');
+  });
+});
+
+describe("unified updatable field blocks (presets + any field)", () => {
+  const ctx = { itemData: SAMPLE_ITEM, annotations: SAMPLE_ANNOTATIONS, citekey: SAMPLE_ITEM.citekey };
+
+  it("every UPDATABLE_FIELDS option builds a valid block that renders", () => {
+    for (const opt of UPDATABLE_FIELDS) {
+      const blk = fieldBlockTextFor(opt);
+      expect(blk, opt.id).toMatch(/^%% zon kind=field (var|format)=/);
+      const out = previewTemplate(blk, ctx);
+      expect(out.error, opt.id + ": " + out.raw).toBeFalsy();
+    }
+  });
+
+  it("the All tags option is an updatable block of the item's tags", () => {
+    const opt = UPDATABLE_FIELDS.find((f) => f.id === "allTags");
+    expect(fieldBlockMarkerOpen(opt)).toBe("%% zon kind=field var=allTags sync=on %%");
+    expect(previewTemplate(fieldBlockTextFor(opt), ctx).preview).toContain("coproduction, methods, sample");
+  });
+
+  it("a formatted preset uses its named format", () => {
+    const opt = UPDATABLE_FIELDS.find((f) => f.id === "citation");
+    expect(fieldBlockMarkerOpen(opt)).toBe("%% zon kind=field format=citation sync=on %%");
+    expect(previewTemplate(fieldBlockTextFor(opt), ctx).preview).toContain("Doe J and Smith A (2023)");
+  });
+
+  it("fieldOptionId maps a block's config back to its option (for the configurator)", () => {
+    expect(fieldOptionId({ var: "allTags" })).toBe("allTags");
+    expect(fieldOptionId({ format: "citation" })).toBe("citation");
+    expect(fieldOptionId({ var: "nope" })).toBeNull();
   });
 });
 

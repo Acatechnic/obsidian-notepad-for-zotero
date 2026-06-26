@@ -47,14 +47,6 @@
     header.append(el("span", "b-sub", usingSample
       ? "previewing with sample data (no item selected)"
       : "previewing: " + (ctx.itemData.title || ctx.citekey || "selected item")));
-    // Declutter toggles (reuse the note editor's view engine): hide the %% zon %%
-    // markers, or render links/headings inline — friendlier for newcomers.
-    var mkToggle = function (label, on) {
-      var lab = el("label", "b-toggle"); var cb = doc.createElement("input"); cb.type = "checkbox"; cb.checked = !!on;
-      lab.append(cb, el("span", null, label)); header.append(lab); return cb;
-    };
-    var markersChk = mkToggle("Markers", true);
-    var readChk = mkToggle("Reading view", false);
     var closeX = el("button", "b-x", "✕"); closeX.title = "Close (Esc)";
     header.append(closeX);
 
@@ -106,9 +98,6 @@
       onChange: function () { schedulePreview(); renderPalette(); },
       onCursor: function () { renderPalette(); },
     });
-    // Wire the declutter toggles now the editor exists.
-    markersChk.addEventListener("change", function () { try { Ed.setShowMarkers(view, markersChk.checked); } catch (e) {} });
-    readChk.addEventListener("change", function () { try { Ed.setReadMode(view, readChk.checked); } catch (e) {} });
 
     // ---- live preview -------------------------------------------------------
     var previewTimer = null;
@@ -262,12 +251,59 @@
       selectRow("Updates", [["on", "live (re-syncs from Zotero)"], ["off", "static (frozen snapshot)"]], cfgState.sync, function (v) { cfgState.sync = v; onChange(); });
 
       if (mode === "add") {
+        // "Separate block per colour": instead of one block filtered to several
+        // colours, emit one block per selected colour (no headings, just blocks).
+        var sep = { on: false };
+        var sepLab = el("label", "b-check");
+        var sepCb = doc.createElement("input"); sepCb.type = "checkbox";
+        sepCb.addEventListener("change", function () { sep.on = sepCb.checked; });
+        sepLab.append(sepCb, el("span", null, "Separate block per colour"));
+        side.append(sepLab);
         var ins = el("button", "b-btn b-primary b-gen", "Insert annotation block");
-        ins.addEventListener("click", function () { insert(Core.annotationBlockText(toConfig(cfgState))); });
+        ins.addEventListener("click", function () {
+          if (sep.on && cfgState.colours.length > 1) {
+            var blocks = cfgState.colours.map(function (col) {
+              var c = toConfig(cfgState); c.colour = col; return Core.annotationBlockText(c);
+            }).join("\n\n");
+            insert(blocks);
+          } else {
+            insert(Core.annotationBlockText(toConfig(cfgState)));
+          }
+        });
         side.append(ins);
       } else {
         side.append(el("div", "b-hint", "Editing the block at your cursor — changes apply live."));
       }
+    }
+
+    // ---- updatable field block picker + in-block field configurator ---------
+    function buildUpdatableFieldBlock() {
+      side.append(el("div", "b-pal-head", "Updatable field block"));
+      var box = el("div");
+      var first = (Core.UPDATABLE_FIELDS && Core.UPDATABLE_FIELDS[0]) ? Core.UPDATABLE_FIELDS[0].id : "citation";
+      var sel = selectInto(box, "Field", (Core.UPDATABLE_FIELDS || []).map(function (f) { return [f.id, f.label]; }), first, function () {});
+      side.append(box);
+      var btn = el("button", "b-btn", "Insert field block");
+      btn.addEventListener("click", function () {
+        var opt = (Core.UPDATABLE_FIELDS || []).filter(function (f) { return f.id === sel.value; })[0];
+        if (opt) insert(Core.fieldBlockTextFor(opt));
+      });
+      side.append(btn);
+    }
+    function buildFieldConfigurator(fb) {
+      side.append(el("div", "b-pal-head", "Field block"));
+      var box = el("div");
+      var curId = fb ? Core.fieldOptionId(fb.config) : null;
+      var first = (Core.UPDATABLE_FIELDS && Core.UPDATABLE_FIELDS[0]) ? Core.UPDATABLE_FIELDS[0].id : "citation";
+      selectInto(box, "Field", (Core.UPDATABLE_FIELDS || []).map(function (f) { return [f.id, f.label]; }), curId || first, function (v) {
+        var cur = ""; try { cur = Ed.getDoc(view) || ""; } catch (e) {}
+        var pos = 0; try { pos = Ed.getCursor(view); } catch (e) {}
+        var b = Core.blockConfigAt(cur, pos);
+        var opt = (Core.UPDATABLE_FIELDS || []).filter(function (f) { return f.id === v; })[0];
+        if (b && opt) { try { Ed.replaceRange(view, b.openStart, b.openEnd, Core.fieldBlockMarkerOpen(opt)); } catch (e) {} schedulePreview(); }
+      });
+      side.append(box);
+      side.append(el("div", "b-hint", "Editing the field block at your cursor — changes apply live."));
     }
     // ---- frontmatter field builder (add / remove) --------------------------
     // Apply a frontmatter change, keeping the cursor in the frontmatter so the
@@ -280,10 +316,33 @@
       var after = ""; try { after = Ed.getDoc(view) || ""; } catch (e) {}
       var nr2 = Core.frontmatterRange(after);
       try { Ed.setCursor(view, nr2 ? nr2.start + nr2.fence1.length : 0); } catch (e) {}
-      schedulePreview(); renderPalette(true);
+      schedulePreview();
+      // Rebuild the panel DIRECTLY (don't depend on cursor/context detection) so
+      // the standard-field toggles + the remove list reflect the change live.
+      side.textContent = ""; lastCtxKey = null; buildFrontmatterPanel();
     }
+    function keyOf(line) { return (String(line).split(":")[0] || "").trim(); }
     function buildFrontmatterPanel() {
-      side.append(el("div", "b-pal-head", "Add a field"));
+      var cur = ""; try { cur = Ed.getDoc(view) || ""; } catch (e) {}
+      var present = {}; Core.frontmatterFieldKeys(cur).forEach(function (k) { present[k] = true; });
+
+      // Standard synced fields — one-click on/off (toggle adds/removes the line).
+      side.append(el("div", "b-pal-head", "Standard fields (synced) — click to add/remove"));
+      var stdWrap = el("div", "b-pal-group");
+      (Core.FRONTMATTER_FIELDS || []).forEach(function (f) {
+        var key = keyOf(f.text); var on = !!present[key];
+        var chip = el("button", "b-chip" + (on ? " b-on" : ""), f.label);
+        chip.title = (on ? "Remove " : "Add ") + key;
+        chip.addEventListener("click", function () {
+          var d = ""; try { d = Ed.getDoc(view) || ""; } catch (e) {}
+          applyFm(on ? Core.removeFrontmatterField(d, key) : Core.addFrontmatterField(d, f.text));
+        });
+        stdWrap.append(chip);
+      });
+      side.append(stdWrap);
+
+      // Add a custom field (your own key + a value source).
+      side.append(el("div", "b-pal-head", "Add a custom field"));
       var keyIn = el("input", "b-name"); keyIn.type = "text"; keyIn.placeholder = "field name (e.g. Topics)"; keyIn.style.width = "100%";
       side.append(keyIn);
       var valBox = el("div");
@@ -293,15 +352,15 @@
       side.append(customIn);
       function syncCustom() { customIn.style.display = valSel.value === "custom" ? "" : "none"; }
       syncCustom();
-      var addBtn = el("button", "b-btn b-primary b-gen", "Add field");
+      var addBtn = el("button", "b-btn b-gen", "Add custom field");
       addBtn.addEventListener("click", function () {
-        var cur = ""; try { cur = Ed.getDoc(view) || ""; } catch (e) {}
+        var d = ""; try { d = Ed.getDoc(view) || ""; } catch (e) {}
         var v = (Core.FRONTMATTER_VALUES || []).filter(function (x) { return x.id === valSel.value; })[0];
-        applyFm(Core.addFrontmatterField(cur, Core.frontmatterFieldText(keyIn.value, v, customIn.value)));
+        applyFm(Core.addFrontmatterField(d, Core.frontmatterFieldText(keyIn.value, v, customIn.value)));
       });
       side.append(addBtn);
 
-      var cur = ""; try { cur = Ed.getDoc(view) || ""; } catch (e) {}
+      // Everything currently in the frontmatter (remove any of it).
       var keys = Core.frontmatterFieldKeys(cur);
       if (keys.length) {
         side.append(el("div", "b-pal-head", "Fields in this note (✕ to remove)"));
@@ -318,40 +377,6 @@
         });
         side.append(list);
       }
-      varGroup("Item variables", Core.ITEM_VARIABLES || [], itemValue);
-    }
-
-    // Route highlights by colour → one highlights() section per colour.
-    function buildColourRoute() {
-      side.append(el("div", "b-pal-head", "Route highlights by colour"));
-      var st = { colours: [], format: "quote", headings: true };
-      var wrap = el("div", "b-pal-group");
-      (Core.BLOCK_COLOURS || []).forEach(function (col) {
-        var chip = el("button", "b-chip b-col", col);
-        chip.addEventListener("click", function () {
-          var i = st.colours.indexOf(col); if (i === -1) st.colours.push(col); else st.colours.splice(i, 1);
-          chip.classList.toggle("b-on");
-        });
-        wrap.append(chip);
-      });
-      side.append(wrap);
-      selectInto(side, "Format", formatNames.map(function (n) { return [n, n]; }), st.format, function (v) { st.format = v; });
-      var hLab = el("label", "b-check");
-      var hcb = doc.createElement("input"); hcb.type = "checkbox"; hcb.checked = true;
-      hcb.addEventListener("change", function () { st.headings = hcb.checked; });
-      hLab.append(hcb, el("span", null, "Heading per colour")); side.append(hLab);
-      var btn = el("button", "b-btn b-gen", "Insert colour-routed sections");
-      btn.addEventListener("click", function () { insert(Core.colourRouteText(st)); });
-      side.append(btn);
-    }
-    // Insert an updatable field block for any single item field.
-    function buildCustomFieldBlock() {
-      var box = el("div");
-      var sel = selectInto(box, "Custom field block (any field)", (Core.FIELD_VARS || []), (Core.FIELD_VARS && Core.FIELD_VARS[0] ? Core.FIELD_VARS[0][0] : "title"), function () {});
-      side.append(box);
-      var btn = el("button", "b-btn", "Insert field block");
-      btn.addEventListener("click", function () { insert(Core.fieldBlockVarText(sel.value)); });
-      side.append(btn);
     }
 
     function selectRow(label, pairs, value, onSet) { var box = el("div"); side.append(box); return selectInto(box, label, pairs, value, onSet); }
@@ -380,7 +405,7 @@
       side.textContent = "";
       side.append(el("div", "b-ctx", c.context === "frontmatter" ? "Cursor in frontmatter"
         : inAnnBlock ? "Editing the annotation block at your cursor"
-        : c.context === "block" ? "Cursor inside a field block"
+        : c.context === "block" ? "Editing the field block at your cursor"
         : isFormatDoc ? "Editing a per-highlight format"
         : "Cursor in the note body"));
       if (c.context === "frontmatter") {
@@ -389,16 +414,14 @@
         cfgState = configToState(b.config); // reflect the block under the cursor
         buildConfigurator("edit");
       } else if (c.context === "block") {
-        varGroup("Item variables", Core.ITEM_VARIABLES || [], itemValue);
+        buildFieldConfigurator(b || Core.blockConfigAt(cur, pos));
       } else if (isFormatDoc) {
         varGroup("Highlight variables", Core.BLOCK_VARIABLES || []);
       } else {
-        side.append(el("div", "b-pal-head", "Add annotation block"));
+        side.append(el("div", "b-pal-head", "Updatable annotation block"));
         buildConfigurator("add");
-        buildColourRoute();
-        group("Updatable fields", Core.FIELD_BLOCKS || [], tText, tLabel);
-        buildCustomFieldBlock();
-        varGroup("Item variables", Core.ITEM_VARIABLES || [], itemValue);
+        buildUpdatableFieldBlock();
+        varGroup("Fixed field value", Core.ITEM_VARIABLES || [], itemValue);
       }
     }
 

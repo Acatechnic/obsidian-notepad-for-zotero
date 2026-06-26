@@ -120,6 +120,43 @@ export function fieldBlockVarText(varId) {
   return "%% zon kind=field var=" + v + " sync=on %%\n%% /zon %%";
 }
 
+// The unified "Updatable field block" menu: the formatted presets (a named
+// FIELD_FORMAT) plus any single item field (var=…), including All tags. One list,
+// one picker — what goes in the body as a field block that re-syncs on Update.
+export const UPDATABLE_FIELDS = [
+  { id: "citation", label: "Citation (formatted)", format: "citation" },
+  { id: "abstract", label: "Abstract (callout)", format: "abstract" },
+  { id: "title", label: "Title (heading)", format: "title" },
+  { id: "authors", label: "Authors (links)", format: "authors" },
+  { id: "allTags", label: "All tags", var: "allTags" },
+  { id: "publicationTitle", label: "Journal / publication", var: "publicationTitle" },
+  { id: "itemType", label: "Item type", var: "itemType" },
+  { id: "date", label: "Date", var: "date" },
+  { id: "dateAdded", label: "Date added", var: "dateAdded" },
+  { id: "dateModified", label: "Date modified", var: "dateModified" },
+  { id: "citekey", label: "Citekey", var: "citekey" },
+  { id: "openPdf", label: "Open-PDF link", var: "openPdf" },
+  { id: "desktopURI", label: "Zotero link", var: "desktopURI" },
+];
+
+// Open marker / full block for an UPDATABLE_FIELDS option.
+export function fieldBlockMarkerOpen(opt) {
+  const o = opt || {};
+  const spec = o.var ? "var=" + o.var : "format=" + (o.format || "citation");
+  return "%% zon kind=field " + spec + " sync=on %%";
+}
+export function fieldBlockTextFor(opt) {
+  return fieldBlockMarkerOpen(opt) + "\n%% /zon %%";
+}
+// Match a field block's parsed config back to a UPDATABLE_FIELDS id (for the
+// in-block configurator to reflect what's there).
+export function fieldOptionId(config) {
+  const c = config || {};
+  if (c.var) { const m = UPDATABLE_FIELDS.find((f) => f.var === c.var); return m ? m.id : null; }
+  if (c.format) { const m = UPDATABLE_FIELDS.find((f) => f.format === c.format); return m ? m.id : null; }
+  return null;
+}
+
 // Route highlights by colour into one section each, via the highlights() helper —
 // for a whole-note template. opts = { colours:[names], format, headings }.
 export function colourRouteText(opts) {
