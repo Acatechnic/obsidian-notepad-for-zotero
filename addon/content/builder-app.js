@@ -173,15 +173,15 @@
     }
 
     // ---- annotation-block configurator state -------------------------------
-    var cfgState = { colours: [], tag: "", commentOnly: false, type: "", mode: "compose", format: "quote", style: "quote", parts: ["page", "comment"], sync: "on" };
+    var cfgState = { colours: [], tag: "", commentOnly: false, type: "", mode: "compose", format: "quote", style: "quote", parts: ["page", "comment"], commentFirst: false, sync: "on" };
     function toConfig(s) {
       var cfg = { colour: s.colours.length ? s.colours.join(",") : "all", tag: s.tag || "", type: s.type || "", sync: s.sync };
       if (s.commentOnly) cfg.comment = "yes";
-      if (s.mode === "compose") { cfg.style = s.style; cfg.parts = s.parts.join(","); } else { cfg.format = s.format; }
+      if (s.mode === "compose") { cfg.style = s.style; cfg.parts = s.parts.join(","); if (s.commentFirst) cfg.order = "comment-first"; } else { cfg.format = s.format; }
       return cfg;
     }
     function configToState(c) {
-      var s = { colours: (c.colour && c.colour !== "all") ? c.colour.split(",") : [], tag: c.tag || "", commentOnly: c.comment === "yes", type: c.type || "", sync: c.sync === "off" ? "off" : "on", format: "quote", style: "quote", parts: ["page", "comment"], mode: "compose" };
+      var s = { colours: (c.colour && c.colour !== "all") ? c.colour.split(",") : [], tag: c.tag || "", commentOnly: c.comment === "yes", type: c.type || "", sync: c.sync === "off" ? "off" : "on", format: "quote", style: "quote", parts: ["page", "comment"], commentFirst: c.order === "comment-first", mode: "compose" };
       if (c.style) { s.mode = "compose"; s.style = c.style; s.parts = (c.parts || "").split(",").filter(Boolean); }
       else { s.mode = "named"; s.format = c.format || "quote"; }
       return s;
@@ -260,6 +260,13 @@
             lab.append(cb, el("span", null, p[1])); pWrap.append(lab);
           });
           fmtBody.append(pWrap);
+          // Comment first: lead with YOUR comment, quote underneath as support.
+          var cfLab = el("label", "b-check");
+          var cfCb = doc.createElement("input"); cfCb.type = "checkbox"; cfCb.checked = !!cfgState.commentFirst;
+          cfCb.addEventListener("change", function () { cfgState.commentFirst = cfCb.checked; onChange(); });
+          cfLab.append(cfCb, el("span", null, "Comment first"));
+          cfLab.title = "Put your comment above the quote (only affects blocks that include the comment)";
+          fmtBody.append(cfLab);
         }
       }
       renderFmtBody();
@@ -268,24 +275,39 @@
       selectRow("Updates", [["on", "live (re-syncs from Zotero)"], ["off", "static (frozen snapshot)"]], cfgState.sync, function (v) { cfgState.sync = v; onChange(); });
 
       if (mode === "add") {
-        // "Separate block per colour": instead of one block filtered to several
-        // colours, emit one block per selected colour (no headings, just blocks).
-        var sep = { on: false };
-        var sepLab = el("label", "b-check");
-        var sepCb = doc.createElement("input"); sepCb.type = "checkbox";
-        sepCb.addEventListener("change", function () { sep.on = sepCb.checked; });
-        sepLab.append(sepCb, el("span", null, "Separate block per colour"));
-        side.append(sepLab);
+        // "Separate block per …": instead of ONE block filtered to several colours
+        // (or tags), emit one block per selected colour and/or per tag — a grid of
+        // blocks (no headings, just blocks). Each split only kicks in when there's
+        // more than one value to split on.
+        var sepCol = { on: false }, sepTag = { on: false };
+        var mkSep = function (label, state) {
+          var lab = el("label", "b-check");
+          var cb = doc.createElement("input"); cb.type = "checkbox";
+          cb.addEventListener("change", function () { state.on = cb.checked; });
+          lab.append(cb, el("span", null, label));
+          side.append(lab);
+        };
+        mkSep("Separate block per colour", sepCol);
+        mkSep("Separate block per tag", sepTag);
         var ins = el("button", "b-btn b-primary b-gen", "Insert annotation block");
         ins.addEventListener("click", function () {
-          if (sep.on && cfgState.colours.length > 1) {
-            var blocks = cfgState.colours.map(function (col) {
-              var c = toConfig(cfgState); c.colour = col; return Core.annotationBlockText(c);
-            }).join("\n\n");
-            insert(blocks);
-          } else {
+          var tagArr = String(cfgState.tag || "").split(",").map(function (t) { return t.trim(); }).filter(Boolean);
+          var cols = (sepCol.on && cfgState.colours.length > 1) ? cfgState.colours : [null];
+          var tags = (sepTag.on && tagArr.length > 1) ? tagArr : [null];
+          if (cols.length === 1 && tags.length === 1) {
             insert(Core.annotationBlockText(toConfig(cfgState)));
+            return;
           }
+          var blocks = [];
+          cols.forEach(function (col) {
+            tags.forEach(function (tg) {
+              var c = toConfig(cfgState);
+              if (col !== null) c.colour = col;
+              if (tg !== null) c.tag = tg;
+              blocks.push(Core.annotationBlockText(c));
+            });
+          });
+          insert(blocks.join("\n\n"));
         });
         side.append(ins);
       } else {
@@ -294,32 +316,72 @@
     }
 
     // ---- updatable field block picker + in-block field configurator ---------
+    // A field block renders one piece of item metadata in the body and refreshes on
+    // Update. Two flavours: FORMATTED PRESETS (citation/abstract/title/authors —
+    // these carry their OWN label, e.g. "**Citation:**", so don't add one yourself)
+    // and ANY FIELD (a bare value you can label however you like).
+    function fieldOpts() { return Core.UPDATABLE_FIELDS || []; }
+    function findFieldOpt(id) { return fieldOpts().filter(function (f) { return f.id === id; })[0]; }
+    // What the selected field will render as, for the live hint.
+    function fieldRenderHint(opt) {
+      if (!opt) return "";
+      if (opt.format) return "formatted — includes its own label (e.g. “" + opt.label.replace(/\s*\(.*\)$/, "") + ":”), so don’t type one too";
+      try {
+        var s = Core.render ? Core.render("{{" + opt.var + "}}", ctx.itemData || {}) : "";
+        s = String(s == null ? "" : s).replace(/\s+/g, " ").trim();
+        return s ? "renders as: " + (s.length > 40 ? s.slice(0, 40) + "…" : s) : "a bare value (add your own label)";
+      } catch (e) { return "a bare value (add your own label)"; }
+    }
+    // Build a grouped <select> (Formatted presets vs Any field) — optgroups make
+    // the two kinds visible, which the flat list didn't.
+    function fieldSelect(value) {
+      var sel = el("select", "b-select"); sel.style.width = "100%";
+      var presets = el("optgroup"); presets.label = "Formatted presets (own label)";
+      var plain = el("optgroup"); plain.label = "Any field (bare value)";
+      fieldOpts().forEach(function (f) {
+        var o = el("option"); o.value = f.id; o.textContent = f.label; if (f.id === value) o.selected = true;
+        (f.format ? presets : plain).append(o);
+      });
+      sel.append(presets, plain);
+      return sel;
+    }
     function buildUpdatableFieldBlock() {
       side.append(el("div", "b-section", "Updatable field block"));
-      var box = el("div");
-      var first = (Core.UPDATABLE_FIELDS && Core.UPDATABLE_FIELDS[0]) ? Core.UPDATABLE_FIELDS[0].id : "citation";
-      var sel = selectInto(box, "Field", (Core.UPDATABLE_FIELDS || []).map(function (f) { return [f.id, f.label]; }), first, function () {});
-      side.append(box);
+      var box = el("div"); side.append(box);
+      box.append(el("div", "b-pal-head", "Field"));
+      var first = fieldOpts()[0] ? fieldOpts()[0].id : "citation";
+      var sel = fieldSelect(first); box.append(sel);
+      var hint = el("div", "b-hint", fieldRenderHint(findFieldOpt(first)));
+      var syncState = { v: "on" };
+      selectInto(box, "Updates", [["on", "live (re-syncs from Zotero)"], ["off", "static (frozen snapshot)"]], "on", function (v) { syncState.v = v; });
+      box.append(hint);
+      sel.addEventListener("change", function () { hint.textContent = fieldRenderHint(findFieldOpt(sel.value)); });
       var btn = el("button", "b-btn b-primary b-gen", "Insert field block");
       btn.addEventListener("click", function () {
-        var opt = (Core.UPDATABLE_FIELDS || []).filter(function (f) { return f.id === sel.value; })[0];
-        if (opt) insert(Core.fieldBlockTextFor(opt));
+        var opt = findFieldOpt(sel.value);
+        if (opt) insert(Core.fieldBlockTextFor(opt, syncState.v));
       });
       side.append(btn);
     }
     function buildFieldConfigurator(fb) {
       side.append(el("div", "b-section", "Field block"));
-      var box = el("div");
+      var box = el("div"); side.append(box);
       var curId = fb ? Core.fieldOptionId(fb.config) : null;
-      var first = (Core.UPDATABLE_FIELDS && Core.UPDATABLE_FIELDS[0]) ? Core.UPDATABLE_FIELDS[0].id : "citation";
-      selectInto(box, "Field", (Core.UPDATABLE_FIELDS || []).map(function (f) { return [f.id, f.label]; }), curId || first, function (v) {
+      var first = fieldOpts()[0] ? fieldOpts()[0].id : "citation";
+      box.append(el("div", "b-pal-head", "Field"));
+      var sel = fieldSelect(curId || first); box.append(sel);
+      var hint = el("div", "b-hint", fieldRenderHint(findFieldOpt(curId || first)));
+      box.append(hint);
+      sel.addEventListener("change", function () {
+        hint.textContent = fieldRenderHint(findFieldOpt(sel.value));
         var cur = ""; try { cur = Ed.getDoc(view) || ""; } catch (e) {}
         var pos = 0; try { pos = Ed.getCursor(view); } catch (e) {}
         var b = Core.blockConfigAt(cur, pos);
-        var opt = (Core.UPDATABLE_FIELDS || []).filter(function (f) { return f.id === v; })[0];
-        if (b && opt) { try { Ed.replaceRange(view, b.openStart, b.openEnd, Core.fieldBlockMarkerOpen(opt)); } catch (e) {} schedulePreview(); }
+        var opt = findFieldOpt(sel.value);
+        // Preserve the block's live/static flag when swapping the field.
+        var sync = b && b.config && b.config.sync === "off" ? "off" : "on";
+        if (b && opt) { try { Ed.replaceRange(view, b.openStart, b.openEnd, Core.fieldBlockMarkerOpen(opt, sync)); } catch (e) {} schedulePreview(); }
       });
-      side.append(box);
       side.append(el("div", "b-hint", "Editing the field block at your cursor — changes apply live."));
     }
     // ---- frontmatter field builder (add / remove) --------------------------

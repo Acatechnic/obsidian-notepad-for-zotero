@@ -49,8 +49,11 @@ export const DEFAULT_FORMAT_NAME = "list";
 // behind the block configurator's "advanced" mode. A block can carry
 // `style=quote parts=page,comment,tags` instead of a named `format=…`, and the
 // renderer composes the body from these (the highlight `text` is always shown).
+// `commentFirst` (from a block's `order=comment-first`) reverses the quote↔comment
+// order, so YOUR comment leads and the quote sits underneath as support — for all
+// three styles. It only changes anything when `comment` is one of the parts.
 // Pure; returns a `{ item, sep }` format object like the named ones.
-export function composeFormat(style, parts) {
+export function composeFormat(style, parts, commentFirst = false) {
   const list = Array.isArray(parts)
     ? parts
     : String(parts == null ? "" : parts).split(",").map((s) => s.trim()).filter(Boolean);
@@ -62,13 +65,20 @@ export function composeFormat(style, parts) {
   const body = (quoted) =>
     "{% if imageBaseName %}![[{{attachmentFolder}}/{{citekey}}/{{imageBaseName}}]]{% else %}"
     + (quoted ? '"{{text}}"' : "{{text}}") + "{% endif %}";
+  const lead = commentFirst && p.comment;
   if (style === "list") {
-    return { item: "- " + (p.page ? "[p.{{page}}]({{link}}) " : "") + body(true) + (p.comment ? "{% if comment %} — *{{comment}}*{% endif %}" : "") + tagBit, sep: "\n" };
+    const bullet = "- " + (p.page ? "[p.{{page}}]({{link}}) " : "") + body(true) + tagBit;
+    // Comment first: it leads on its own line, then the bullet underneath.
+    if (lead) return { item: "{% if comment %}*{{comment}}*\n{% endif %}" + bullet, sep: "\n" };
+    return { item: bullet + (p.comment ? "{% if comment %} — *{{comment}}*{% endif %}" : ""), sep: "\n" };
   }
   if (style === "callout") {
-    return { item: "> [!quote]" + (p.page ? " p.{{page}}" : "") + "\n> " + body(false) + tagBit + (p.comment ? "{% if comment %}\n>\n> {{comment}}{% endif %}" : ""), sep: "\n\n" };
+    const head = "> [!quote]" + (p.page ? " p.{{page}}" : "");
+    if (lead) return { item: head + "{% if comment %}\n> {{comment}}\n>{% endif %}\n> " + body(false) + tagBit, sep: "\n\n" };
+    return { item: head + "\n> " + body(false) + tagBit + (p.comment ? "{% if comment %}\n>\n> {{comment}}{% endif %}" : ""), sep: "\n\n" };
   }
   // quote (default)
+  if (lead) return { item: "{% if comment %}> {{comment}}\n>\n{% endif %}> " + body(false) + tagBit + (p.page ? "\n> — [p.{{page}}]({{link}})" : ""), sep: "\n\n" };
   return { item: "> " + body(false) + tagBit + (p.page ? "\n> — [p.{{page}}]({{link}})" : "") + (p.comment ? "\n{% if comment %}>\n> {{comment}}{% endif %}" : ""), sep: "\n\n" };
 }
 

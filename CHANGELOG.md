@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Template Builder: "Comment first" for composed blocks.** In the annotation
+  block's Compose mode you can now lead with **your comment** and put the quote
+  underneath as support (works for the list, blockquote and callout styles). It
+  writes `order=comment-first` on the block marker.
+- **Template Builder: split into separate blocks per tag.** Alongside "Separate
+  block per colour", inserting an annotation block can now emit one block **per
+  tag** (when the tag filter lists more than one), and the two splits combine into
+  a colour × tag grid of blocks.
+
+### Changed
+- **Template Builder: richer updatable-field picker.** The field picker now
+  groups **formatted presets** (citation/abstract/title/authors — which carry
+  their own label, e.g. "**Citation:**") apart from **any field** (a bare value
+  you label yourself), shows what the chosen field renders as, and lets you pick
+  live vs static. This clarifies the "Citation appears twice" case — the formatted
+  preset already includes its own `Citation:` label, so you don't add one.
+
 ## [1.0.0-beta.15] — 2026-06-26
 
 ### Added

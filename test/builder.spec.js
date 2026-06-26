@@ -171,6 +171,28 @@ describe("annotation-block configurator engine", () => {
     expect(b2).toContain("— *core claim*");
   });
 
+  it("composeFormat comment-first leads with the comment in every style", () => {
+    for (const style of ["list", "quote", "callout"]) {
+      const f = composeFormat(style, ["page", "comment"], true);
+      // The comment template segment must precede the highlight text segment.
+      const iComment = f.item.indexOf("{{comment}}");
+      const iText = f.item.indexOf("{{text}}");
+      expect(iComment, style).toBeGreaterThan(-1);
+      expect(iComment, style).toBeLessThan(iText);
+    }
+    // No-op when the comment part isn't included.
+    const noComment = composeFormat("quote", ["page"], true);
+    expect(noComment.item).toBe(composeFormat("quote", ["page"], false).item);
+  });
+
+  it("order=comment-first renders the comment above the quote", () => {
+    const body = renderBlockBody(
+      { colour: "all", style: "quote", parts: "comment,page", order: "comment-first" },
+      SAMPLE_ANNOTATIONS, {});
+    // SAMP0001: comment "core claim" should appear before its quoted text.
+    expect(body.indexOf("core claim")).toBeLessThan(body.indexOf("Coproduction reshapes"));
+  });
+
   it("composed formats handle IMAGE annotations (embed, not empty quotes)", () => {
     const IMG = [{ key: "IM", type: "image", attachmentKey: "PDF", pageLabel: "2", pageIndex: 1, sortIndex: "1", annotatedText: "", colourName: "yellow", imageBaseName: "doe-p2-IM.png" }];
     for (const style of ["list", "quote", "callout"]) {
@@ -300,6 +322,15 @@ describe("unified updatable field blocks (presets + any field)", () => {
     const opt = UPDATABLE_FIELDS.find((f) => f.id === "citation");
     expect(fieldBlockMarkerOpen(opt)).toBe("%% zon kind=field format=citation sync=on %%");
     expect(previewTemplate(fieldBlockTextFor(opt), ctx).preview).toContain("Doe J and Smith A (2023)");
+  });
+
+  it("the field-block picker can emit a static (sync=off) snapshot", () => {
+    const opt = UPDATABLE_FIELDS.find((f) => f.id === "citation");
+    expect(fieldBlockMarkerOpen(opt, "off")).toBe("%% zon kind=field format=citation sync=off %%");
+    expect(fieldBlockTextFor(opt, "off")).toContain("sync=off");
+    // Default and any other value stay live.
+    expect(fieldBlockMarkerOpen(opt)).toContain("sync=on");
+    expect(fieldBlockMarkerOpen(opt, "on")).toContain("sync=on");
   });
 
   it("fieldOptionId maps a block's config back to its option (for the configurator)", () => {

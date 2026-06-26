@@ -139,14 +139,15 @@ export const UPDATABLE_FIELDS = [
   { id: "desktopURI", label: "Zotero link", var: "desktopURI" },
 ];
 
-// Open marker / full block for an UPDATABLE_FIELDS option.
-export function fieldBlockMarkerOpen(opt) {
+// Open marker / full block for an UPDATABLE_FIELDS option. `sync` defaults to
+// "on" (live, re-syncs on Update); pass "off" for a frozen one-time snapshot.
+export function fieldBlockMarkerOpen(opt, sync) {
   const o = opt || {};
   const spec = o.var ? "var=" + o.var : "format=" + (o.format || "citation");
-  return "%% zon kind=field " + spec + " sync=on %%";
+  return "%% zon kind=field " + spec + " sync=" + (sync === "off" ? "off" : "on") + " %%";
 }
-export function fieldBlockTextFor(opt) {
-  return fieldBlockMarkerOpen(opt) + "\n%% /zon %%";
+export function fieldBlockTextFor(opt, sync) {
+  return fieldBlockMarkerOpen(opt, sync) + "\n%% /zon %%";
 }
 // Match a field block's parsed config back to a UPDATABLE_FIELDS id (for the
 // in-block configurator to reflect what's there).

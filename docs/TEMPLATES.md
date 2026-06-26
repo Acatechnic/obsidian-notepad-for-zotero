@@ -176,6 +176,9 @@ them. The open marker carries the block's settings as `key=value` attributes:
 | `tag` | a tag name, or a comma list (`tag=method` / `tag=method,finding`) | Only pull highlights carrying one of these **annotation tags** (the tags you add to a highlight in the Zotero reader). Comma list = OR. Combines with `colour`/`type` (AND across filters). Omitted = any. `tags=` is an alias. |
 | `sync` | `on` (default), `off` | `on` = the block **mirrors Zotero** and is regenerated on every Update. `off` = a **frozen** one-time snapshot Update never touches — use it to hand-curate. |
 | `format` | a template name (`list`, `quote`, `callout`, `compact`, or your own file) | Which per-annotation template rendered the body, so Update can re-render it the same way. |
+| `style` | `list`, `quote`, `callout` | Compose a body from a base style + `parts` instead of a named `format` (the Template Builder's "Compose" mode). Takes precedence over `format`. |
+| `parts` | a comma list of `page`, `comment`, `tags` | Which extra pieces a composed (`style=…`) body includes; the highlight text is always shown. |
+| `order` | `comment-first` | On a composed block (`style=…` with `comment` in `parts`), put **your comment first** and the quote underneath as support. Omit for quote-first. |
 
 ### The `%% ann:KEY %%` anchors
 

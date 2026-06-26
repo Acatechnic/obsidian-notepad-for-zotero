@@ -22,7 +22,7 @@ import { pdfLink } from "./annotations.js";
 // Resolve the format a block renders with: a composed `style`+`parts` format (the
 // configurator's advanced mode) takes precedence over a named `format=…`.
 function resolveFormat(config, formats) {
-  if (config.style) return composeFormat(config.style, config.parts);
+  if (config.style) return composeFormat(config.style, config.parts, config.order === "comment-first");
   return formats[config.format] || formats[DEFAULT_FORMAT_NAME];
 }
 
