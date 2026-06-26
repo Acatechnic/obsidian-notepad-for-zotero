@@ -28,6 +28,11 @@ export const DEFAULT_FORMATS = {
     item: `- {% if imageBaseName %}![[{{attachmentFolder}}/{{citekey}}/{{imageBaseName}}]]{% else %}"{{text}}"{% endif %} (p.{{page}}){% if comment %} — {{comment}}{% endif %}`,
     sep: "\n",
   },
+  // Foregrounds YOUR comment; the quote + page sit underneath as support.
+  "comment-first": {
+    item: `{% if comment %}{{comment}}\n{% endif %}- {% if imageBaseName %}![[{{attachmentFolder}}/{{citekey}}/{{imageBaseName}}]]{% else %}"{{text}}"{% endif %} — [p.{{page}}]({{link}})`,
+    sep: "\n\n",
+  },
 };
 
 export const DEFAULT_FORMAT_NAME = "list";

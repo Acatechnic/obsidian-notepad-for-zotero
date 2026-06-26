@@ -121,6 +121,8 @@ function matchesFilter(a, cfg) {
     const have = a.tags || [];
     if (want.length && !want.some((t) => have.indexOf(t) !== -1)) return false;
   }
+  // `comment=yes` keeps only highlights that carry a non-empty comment.
+  if (cfg.comment === "yes" && !String(a.comment == null ? "" : a.comment).trim()) return false;
   return true;
 }
 

@@ -47,6 +47,15 @@
     header.append(el("span", "b-sub", usingSample
       ? "previewing with sample data (no item selected)"
       : "previewing: " + (ctx.itemData.title || ctx.citekey || "selected item")));
+    // Preview toggles — these control how the LIVE PREVIEW renders (not the editor,
+    // where you author raw source): hide/show the %% zon %% markers, and reading
+    // view (render links/headings inline). Default = clean rendered note.
+    var pvToggle = function (label, on) {
+      var lab = el("label", "b-toggle"); var cb = doc.createElement("input"); cb.type = "checkbox"; cb.checked = !!on;
+      lab.append(cb, el("span", null, label)); header.append(lab); return cb;
+    };
+    var pvMarkers = pvToggle("Markers", false);
+    var pvRead = pvToggle("Reading view", true);
     var closeX = el("button", "b-x", "✕"); closeX.title = "Close (Esc)";
     header.append(closeX);
 
@@ -65,8 +74,8 @@
 
     var kindBadge = el("span", "b-kind");
     var pHead = el("div", "b-colhead"); pHead.append(doc.createTextNode("Live preview "), kindBadge);
-    var previewOut = el("pre", "b-preview-out");
-    previewCol.append(pHead, previewOut);
+    var previewHost = el("div", "b-preview-host");
+    previewCol.append(pHead, previewHost);
 
     // ---- footer -------------------------------------------------------------
     var footer = el("div", "b-footer");
@@ -99,24 +108,24 @@
       onCursor: function () { renderPalette(); },
     });
 
-    // ---- live preview -------------------------------------------------------
+    // ---- live preview (a read-only editor so the toggles can reuse its engine) --
+    var previewView = Ed.create({
+      parent: previewHost, doc: "", editable: false, dark: dark,
+      readMode: true, showMarkers: false, showFrontmatter: true,
+    });
+    pvMarkers.addEventListener("change", function () { try { Ed.setShowMarkers(previewView, pvMarkers.checked); } catch (e) {} });
+    pvRead.addEventListener("change", function () { try { Ed.setReadMode(previewView, pvRead.checked); } catch (e) {} });
+
     var previewTimer = null;
     function renderPreview() {
       var text = ""; try { text = Ed.getDoc(view) || ""; } catch (e) {}
       var r = Core.previewTemplate(text, ctx);
       kindBadge.textContent = r.error ? "not valid yet" : (r.kind === "document" ? "whole-note" : "per-highlight");
       kindBadge.className = "b-kind" + (r.error ? " b-kind-err" : "");
-      previewOut.textContent = r.error
-        ? "The template isn't valid yet — keep editing; the preview updates as you go.\n\n" + (r.preview || "")
-        : (r.preview || "(empty)");
-      previewOut.classList.toggle("b-err", !!r.error);
-      // Inserting a whole-note template mid-note is a foot-gun — only blocks/formats
-      // make sense to insert. (Use Create note / Save for whole-note templates.)
-      if (insertBtn) {
-        var isDoc = r.kind === "document";
-        insertBtn.disabled = isDoc;
-        insertBtn.title = isDoc ? "Whole-note templates can't be inserted into a note — use Save, or Create note from the empty state" : "";
-      }
+      // Show r.raw (markers + filled content); the preview editor's view engine
+      // hides markers / renders reading view per the toggles.
+      var out = r.error ? "⚠️ The template isn't valid yet — keep editing.\n\n" + (r.raw || "") : (r.raw || "");
+      try { Ed.setDoc(previewView, out); } catch (e) {}
     }
     function schedulePreview() { if (previewTimer) clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 180); }
 
@@ -164,14 +173,15 @@
     }
 
     // ---- annotation-block configurator state -------------------------------
-    var cfgState = { colours: [], tag: "", type: "", mode: "named", format: "quote", style: "quote", parts: ["page", "comment"], sync: "on" };
+    var cfgState = { colours: [], tag: "", commentOnly: false, type: "", mode: "compose", format: "quote", style: "quote", parts: ["page", "comment"], sync: "on" };
     function toConfig(s) {
       var cfg = { colour: s.colours.length ? s.colours.join(",") : "all", tag: s.tag || "", type: s.type || "", sync: s.sync };
+      if (s.commentOnly) cfg.comment = "yes";
       if (s.mode === "compose") { cfg.style = s.style; cfg.parts = s.parts.join(","); } else { cfg.format = s.format; }
       return cfg;
     }
     function configToState(c) {
-      var s = { colours: (c.colour && c.colour !== "all") ? c.colour.split(",") : [], tag: c.tag || "", type: c.type || "", sync: c.sync === "off" ? "off" : "on", format: "quote", style: "quote", parts: ["page", "comment"], mode: "named" };
+      var s = { colours: (c.colour && c.colour !== "all") ? c.colour.split(",") : [], tag: c.tag || "", commentOnly: c.comment === "yes", type: c.type || "", sync: c.sync === "off" ? "off" : "on", format: "quote", style: "quote", parts: ["page", "comment"], mode: "compose" };
       if (c.style) { s.mode = "compose"; s.style = c.style; s.parts = (c.parts || "").split(",").filter(Boolean); }
       else { s.mode = "named"; s.format = c.format || "quote"; }
       return s;
@@ -211,6 +221,13 @@
       tagIn.style.width = "100%";
       tagIn.addEventListener("input", function () { cfgState.tag = tagIn.value.replace(/\s/g, ""); onChange(); });
       side.append(tagIn);
+
+      // Only highlights that have a comment
+      var coLab = el("label", "b-check");
+      var coCb = doc.createElement("input"); coCb.type = "checkbox"; coCb.checked = !!cfgState.commentOnly;
+      coCb.addEventListener("change", function () { cfgState.commentOnly = coCb.checked; onChange(); });
+      coLab.append(coCb, el("span", null, "Only highlights with a comment"));
+      side.append(coLab);
 
       // Type
       var typeSel = selectRow("Type", Core.BLOCK_TYPES || [], cfgState.type, function (v) { cfgState.type = v; onChange(); });
@@ -283,7 +300,7 @@
       var first = (Core.UPDATABLE_FIELDS && Core.UPDATABLE_FIELDS[0]) ? Core.UPDATABLE_FIELDS[0].id : "citation";
       var sel = selectInto(box, "Field", (Core.UPDATABLE_FIELDS || []).map(function (f) { return [f.id, f.label]; }), first, function () {});
       side.append(box);
-      var btn = el("button", "b-btn", "Insert field block");
+      var btn = el("button", "b-btn b-primary b-gen", "Insert field block");
       btn.addEventListener("click", function () {
         var opt = (Core.UPDATABLE_FIELDS || []).filter(function (f) { return f.id === sel.value; })[0];
         if (opt) insert(Core.fieldBlockTextFor(opt));
@@ -317,9 +334,11 @@
       var nr2 = Core.frontmatterRange(after);
       try { Ed.setCursor(view, nr2 ? nr2.start + nr2.fence1.length : 0); } catch (e) {}
       schedulePreview();
-      // Rebuild the panel DIRECTLY (don't depend on cursor/context detection) so
-      // the standard-field toggles + the remove list reflect the change live.
-      side.textContent = ""; lastCtxKey = null; buildFrontmatterPanel();
+      // Rebuild the panel on the NEXT tick (after CM's transaction + listeners
+      // settle), reading the fresh doc — so the standard-field toggles and the
+      // remove list reflect the add/remove immediately, not on the next click-away.
+      lastCtxKey = null;
+      setTimeout(function () { try { side.textContent = ""; buildFrontmatterPanel(); } catch (e) {} }, 0);
     }
     function keyOf(line) { return (String(line).split(":")[0] || "").trim(); }
     function buildFrontmatterPanel() {

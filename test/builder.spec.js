@@ -192,6 +192,19 @@ describe("annotation-block configurator engine", () => {
     expect(body).toContain("a clean, quotable sentence");  // blue
   });
 
+  it("comment=yes keeps only highlights that have a comment", () => {
+    const body = renderBlockBody({ colour: "all", comment: "yes", format: "list" }, SAMPLE_ANNOTATIONS, {});
+    expect(body).toContain("Coproduction reshapes");          // SAMP0001 has "core claim"
+    expect(body).not.toContain("a clean, quotable sentence");  // SAMP0002 comment is ""
+  });
+
+  it("the comment-first format foregrounds the comment", () => {
+    const ctx2 = { itemData: SAMPLE_ITEM, annotations: SAMPLE_ANNOTATIONS, citekey: SAMPLE_ITEM.citekey };
+    const out = previewTemplate('%% zon kind=annotations colour=all format=comment-first sync=on %%\n%% /zon %%', ctx2);
+    expect(out.error).toBeFalsy();
+    expect(out.raw).toContain("core claim"); // the comment, leading its block
+  });
+
   it("annotationMarkerOpen / annotationBlockText serialise a config", () => {
     const open = annotationMarkerOpen({ colour: "yellow,blue", tag: "method", style: "quote", parts: "page,comment", sync: "on" });
     expect(open).toBe("%% zon kind=annotations colour=yellow,blue tag=method style=quote parts=page,comment sync=on %%");
