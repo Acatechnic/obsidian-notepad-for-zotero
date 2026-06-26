@@ -135,7 +135,7 @@
       schedulePreview(); renderPalette(true);
     }
     function group(title, items, getText, getLabel) {
-      side.append(el("div", "b-pal-head", title));
+      side.append(el("div", "b-section", title));
       var wrap = el("div", "b-pal-group");
       items.forEach(function (it) {
         var chip = el("button", "b-chip");
@@ -159,7 +159,7 @@
       } catch (e) { return ""; }
     }
     function varGroup(title, vars, getValue) {
-      side.append(el("div", "b-pal-head", title));
+      side.append(el("div", "b-section", title));
       var wrap = el("div", "b-pal-group");
       vars.forEach(function (v) {
         var chip = el("button", "b-chip");
@@ -295,7 +295,7 @@
 
     // ---- updatable field block picker + in-block field configurator ---------
     function buildUpdatableFieldBlock() {
-      side.append(el("div", "b-pal-head", "Updatable field block"));
+      side.append(el("div", "b-section", "Updatable field block"));
       var box = el("div");
       var first = (Core.UPDATABLE_FIELDS && Core.UPDATABLE_FIELDS[0]) ? Core.UPDATABLE_FIELDS[0].id : "citation";
       var sel = selectInto(box, "Field", (Core.UPDATABLE_FIELDS || []).map(function (f) { return [f.id, f.label]; }), first, function () {});
@@ -308,7 +308,7 @@
       side.append(btn);
     }
     function buildFieldConfigurator(fb) {
-      side.append(el("div", "b-pal-head", "Field block"));
+      side.append(el("div", "b-section", "Field block"));
       var box = el("div");
       var curId = fb ? Core.fieldOptionId(fb.config) : null;
       var first = (Core.UPDATABLE_FIELDS && Core.UPDATABLE_FIELDS[0]) ? Core.UPDATABLE_FIELDS[0].id : "citation";
@@ -330,23 +330,20 @@
       var r = Core.frontmatterRange ? Core.frontmatterRange(doc0) : null;
       if (r) { var nr = Core.frontmatterRange(newDoc); try { Ed.replaceRange(view, 0, r.end, newDoc.slice(0, nr.end)); } catch (e) {} }
       else { try { Ed.setDoc(view, newDoc); } catch (e) {} }
-      var after = ""; try { after = Ed.getDoc(view) || ""; } catch (e) {}
-      var nr2 = Core.frontmatterRange(after);
+      var nr2 = Core.frontmatterRange(newDoc);
       try { Ed.setCursor(view, nr2 ? nr2.start + nr2.fence1.length : 0); } catch (e) {}
       schedulePreview();
-      // Rebuild the panel on the NEXT tick (after CM's transaction + listeners
-      // settle), reading the fresh doc — so the standard-field toggles and the
-      // remove list reflect the add/remove immediately, not on the next click-away.
-      lastCtxKey = null;
-      setTimeout(function () { try { side.textContent = ""; buildFrontmatterPanel(); } catch (e) {} }, 0);
+      // Rebuild from the KNOWN new document (don't read it back from the editor —
+      // that read was stale). So the toggles + remove list reflect it immediately.
+      lastCtxKey = null; side.textContent = ""; buildFrontmatterPanel(newDoc);
     }
     function keyOf(line) { return (String(line).split(":")[0] || "").trim(); }
-    function buildFrontmatterPanel() {
-      var cur = ""; try { cur = Ed.getDoc(view) || ""; } catch (e) {}
+    function buildFrontmatterPanel(docText) {
+      var cur = docText != null ? docText : ((function () { try { return Ed.getDoc(view) || ""; } catch (e) { return ""; } })());
       var present = {}; Core.frontmatterFieldKeys(cur).forEach(function (k) { present[k] = true; });
 
       // Standard synced fields — one-click on/off (toggle adds/removes the line).
-      side.append(el("div", "b-pal-head", "Standard fields (synced) — click to add/remove"));
+      side.append(el("div", "b-section", "Standard fields (synced) — click to add/remove"));
       var stdWrap = el("div", "b-pal-group");
       (Core.FRONTMATTER_FIELDS || []).forEach(function (f) {
         var key = keyOf(f.text); var on = !!present[key];
@@ -361,7 +358,7 @@
       side.append(stdWrap);
 
       // Add a custom field (your own key + a value source).
-      side.append(el("div", "b-pal-head", "Add a custom field"));
+      side.append(el("div", "b-section", "Add a custom field"));
       var keyIn = el("input", "b-name"); keyIn.type = "text"; keyIn.placeholder = "field name (e.g. Topics)"; keyIn.style.width = "100%";
       side.append(keyIn);
       var valBox = el("div");
@@ -382,7 +379,7 @@
       // Everything currently in the frontmatter (remove any of it).
       var keys = Core.frontmatterFieldKeys(cur);
       if (keys.length) {
-        side.append(el("div", "b-pal-head", "Fields in this note (✕ to remove)"));
+        side.append(el("div", "b-section", "Fields in this note (✕ to remove)"));
         var list = el("div", "b-pal-group");
         keys.forEach(function (k) {
           var chip = el("button", "b-chip");
@@ -437,7 +434,7 @@
       } else if (isFormatDoc) {
         varGroup("Highlight variables", Core.BLOCK_VARIABLES || []);
       } else {
-        side.append(el("div", "b-pal-head", "Updatable annotation block"));
+        side.append(el("div", "b-section", "Updatable annotation block"));
         buildConfigurator("add");
         buildUpdatableFieldBlock();
         varGroup("Fixed field value", Core.ITEM_VARIABLES || [], itemValue);
