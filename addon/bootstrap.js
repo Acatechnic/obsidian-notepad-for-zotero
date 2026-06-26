@@ -2899,6 +2899,8 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
       + ".b-header{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid " + border + ";}"
       + ".b-title{font-weight:600;font-size:14px;}.b-sub{color:" + muted + ";font-size:12px;flex:1;}"
       + ".b-x{margin-left:auto;border:0;background:transparent;color:" + muted + ";font-size:15px;cursor:pointer;}"
+      + ".b-toggle{display:flex;align-items:center;gap:4px;font-size:11px;color:" + muted + ";cursor:pointer;white-space:nowrap;}"
+      + ".b-help{padding:6px 14px;font-size:11px;color:" + muted + ";background:" + pane + ";border-bottom:1px solid " + border + ";}"
       + ".b-body{flex:1;display:flex;min-height:0;}"
       + ".b-side{width:300px;border-right:1px solid " + border + ";overflow:auto;padding:8px 10px;background:" + pane + ";}"
       + ".b-pal-head{font-weight:600;color:" + muted + ";font-size:11px;text-transform:uppercase;margin:12px 2px 5px;}"

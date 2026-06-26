@@ -47,8 +47,19 @@
     header.append(el("span", "b-sub", usingSample
       ? "previewing with sample data (no item selected)"
       : "previewing: " + (ctx.itemData.title || ctx.citekey || "selected item")));
+    // Declutter toggles (reuse the note editor's view engine): hide the %% zon %%
+    // markers, or render links/headings inline — friendlier for newcomers.
+    var mkToggle = function (label, on) {
+      var lab = el("label", "b-toggle"); var cb = doc.createElement("input"); cb.type = "checkbox"; cb.checked = !!on;
+      lab.append(cb, el("span", null, label)); header.append(lab); return cb;
+    };
+    var markersChk = mkToggle("Markers", true);
+    var readChk = mkToggle("Reading view", false);
     var closeX = el("button", "b-x", "✕"); closeX.title = "Close (Esc)";
     header.append(closeX);
+
+    // One-line orientation for first-timers.
+    var help = el("div", "b-help", "The panel on the left offers pieces for wherever your cursor is. The right shows a live preview. When it looks right, use Create / Insert / Save below.");
 
     // ---- body: palette | editor | preview -----------------------------------
     var body = el("div", "b-body");
@@ -83,7 +94,7 @@
     if (insertBtn) footer.append(insertBtn);
     footer.append(closeBtn, status);
 
-    root.append(header, body, footer);
+    root.append(header, help, body, footer);
 
     // ---- editor -------------------------------------------------------------
     var view = Ed.create({
@@ -92,15 +103,20 @@
       onChange: function () { schedulePreview(); renderPalette(); },
       onCursor: function () { renderPalette(); },
     });
+    // Wire the declutter toggles now the editor exists.
+    markersChk.addEventListener("change", function () { try { Ed.setShowMarkers(view, markersChk.checked); } catch (e) {} });
+    readChk.addEventListener("change", function () { try { Ed.setReadMode(view, readChk.checked); } catch (e) {} });
 
     // ---- live preview -------------------------------------------------------
     var previewTimer = null;
     function renderPreview() {
       var text = ""; try { text = Ed.getDoc(view) || ""; } catch (e) {}
       var r = Core.previewTemplate(text, ctx);
-      kindBadge.textContent = r.kind === "document" ? "whole-note" : "per-highlight";
+      kindBadge.textContent = r.error ? "not valid yet" : (r.kind === "document" ? "whole-note" : "per-highlight");
       kindBadge.className = "b-kind" + (r.error ? " b-kind-err" : "");
-      previewOut.textContent = r.preview || "(empty)";
+      previewOut.textContent = r.error
+        ? "The template isn't valid yet — keep editing; the preview updates as you go.\n\n" + (r.preview || "")
+        : (r.preview || "(empty)");
       previewOut.classList.toggle("b-err", !!r.error);
     }
     function schedulePreview() { if (previewTimer) clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 180); }
@@ -124,6 +140,29 @@
     }
     var vText = function (v) { return v.token; }, vLabel = function (v) { return v.label || v.token; };
     var tText = function (t) { return t.text; }, tLabel = function (t) { return t.label; };
+
+    // Variable chips with a "renders as …" tooltip so beginners can see what a
+    // variable produces for the current item. getValue is optional (item vars).
+    function itemValue(v) {
+      try {
+        var s = Core.render ? Core.render(v.token, ctx.itemData || {}) : "";
+        s = String(s == null ? "" : s).replace(/\s+/g, " ").trim();
+        return s ? (s.length > 44 ? s.slice(0, 44) + "…" : s) : "";
+      } catch (e) { return ""; }
+    }
+    function varGroup(title, vars, getValue) {
+      side.append(el("div", "b-pal-head", title));
+      var wrap = el("div", "b-pal-group");
+      vars.forEach(function (v) {
+        var chip = el("button", "b-chip");
+        chip.append(el("span", "b-chip-l", v.label || v.token));
+        var val = getValue ? getValue(v) : "";
+        chip.title = v.token + (val ? "  →  " + val : (v.label ? "  —  " + v.label : ""));
+        chip.addEventListener("click", function () { insert(v.token); });
+        wrap.append(chip);
+      });
+      side.append(wrap);
+    }
 
     // ---- annotation-block configurator state -------------------------------
     var cfgState = { colours: [], tag: "", type: "", mode: "named", format: "quote", style: "quote", parts: ["page", "comment"], sync: "on" };
@@ -269,7 +308,7 @@
         });
         side.append(list);
       }
-      group("Item variables", Core.ITEM_VARIABLES || [], vText, vLabel);
+      varGroup("Item variables", Core.ITEM_VARIABLES || [], itemValue);
     }
 
     // Route highlights by colour → one highlights() section per colour.
@@ -340,16 +379,16 @@
         cfgState = configToState(b.config); // reflect the block under the cursor
         buildConfigurator("edit");
       } else if (c.context === "block") {
-        group("Item variables", Core.ITEM_VARIABLES || [], vText, vLabel);
+        varGroup("Item variables", Core.ITEM_VARIABLES || [], itemValue);
       } else if (isFormatDoc) {
-        group("Highlight variables", Core.BLOCK_VARIABLES || [], vText, vLabel);
+        varGroup("Highlight variables", Core.BLOCK_VARIABLES || []);
       } else {
         side.append(el("div", "b-pal-head", "Add annotation block"));
         buildConfigurator("add");
         buildColourRoute();
         group("Updatable fields", Core.FIELD_BLOCKS || [], tText, tLabel);
         buildCustomFieldBlock();
-        group("Item variables", Core.ITEM_VARIABLES || [], vText, vLabel);
+        varGroup("Item variables", Core.ITEM_VARIABLES || [], itemValue);
       }
     }
 
