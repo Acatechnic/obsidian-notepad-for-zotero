@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.15] — 2026-06-26
+
 ### Added
 - **Filter an annotations block by tag.** A block can now pull only the highlights
   carrying a given annotation tag: `%% zon kind=annotations tag=method … %%`
