@@ -393,6 +393,10 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     "btn.reload": "Reload",
     "btn.more": "⋯ More",
     "btn.pushTags": "Push tags → Zotero…",
+    "btn.builder": "Template Builder…",
+    "tip.builder": "Compose a template with a live preview, then insert it into this note or save it to your Templates folder",
+    "status.templateSaved": "Saved template ‘{name}’ to your Templates folder",
+    "msg.builderOverwrite": "A template named ‘{name}.md’ already exists. Overwrite it?",
     "btn.createNote": "Create note",
     "btn.rescan": "Rescan",
     "btn.setup": "Set up…",
@@ -1318,6 +1322,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     } catch (e) {}
     let openBtn = h("button"); openBtn.textContent = this.t("btn.openObsidian");
     let reloadBtn = h("button"); reloadBtn.textContent = this.t("btn.reload"); reloadBtn.title = this.t("tip.reload");
+    let builderBtn = h("button"); builderBtn.textContent = this.t("btn.builder"); builderBtn.title = this.t("tip.builder");
     let status = h("span", "zon-status");
 
     // NOTE: live auto-sync is a GLOBAL pref (PREF_AUTOSYNC) driven by the Notifier
@@ -1369,8 +1374,9 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     let row1 = h("div", "zon-row"); row1.append(templateSel, colourSel, syncSel, insertBtn);
     // "⋯ More" (Sync Metadata / Migrate / Push tags) is appended only when
     // experimental features are enabled in Settings — keeps the row uncluttered.
-    let row2 = h("div", "zon-row zon-row-actions"); row2.append(refreshBtn, openBtn, reloadBtn);
+    let row2 = h("div", "zon-row zon-row-actions"); row2.append(refreshBtn, openBtn, reloadBtn, builderBtn);
     if (this.experimentalEnabled()) row2.append(moreWrap);
+    builderBtn.addEventListener("click", () => { try { this.openTemplateBuilder(win, rec); } catch (e) { this.log("openTemplateBuilder failed: " + e); } });
     let row4 = h("div", "zon-row zon-row-view"); row4.append(readLabel, frontLabel, markersLabel);
     toolbar.append(row1, row2, row4, status);
 
@@ -2695,6 +2701,159 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     }
     rec.lib.insertAtCursor(rec.view, "\n" + String(text).trim() + "\n");
     // The edit fires the debounced save automatically (onEdit).
+  },
+
+  // --------------------------------------------------------- Template Builder
+  // A dedicated builder surface: a full-window modal overlay (in the main window)
+  // hosting ONE srcdoc iframe that loads core.bundle.js + editor.bundle.js +
+  // builder-app.js. The iframe runs the whole builder UI (CM editor + palette +
+  // live preview, all over ZONCore — the same pure engine the write paths use);
+  // this glue gathers the preview context from the selected item, opens/tears
+  // down the overlay, and provides the privileged insert/save bridge.
+  async openTemplateBuilder(win, rec) {
+    win = win || Zotero.getMainWindows()[0];
+    if (!win) return;
+    if (!win.ZONCore) await this.injectCore(win);
+    this.closeTemplateBuilder(win); // only one at a time
+
+    let item = (rec && rec.item) || (this.selectedRegularItems(win)[0] || null);
+    let ctx = await this.gatherPreviewContext(win, item);
+    let dark = this.isDarkTheme(win, rec && rec.host);
+
+    let NS = "http://www.w3.org/1999/xhtml";
+    let overlay = win.document.createElementNS(NS, "div");
+    overlay.id = "zon-builder-overlay";
+    overlay.setAttribute("style",
+      "position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;"
+      + "justify-content:center;background:rgba(0,0,0,0.45);");
+    let panel = win.document.createElementNS(NS, "div");
+    panel.setAttribute("style",
+      "width:92%;height:88%;max-width:1180px;max-height:840px;border-radius:10px;"
+      + "overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,0.5);background:"
+      + (dark ? "#1e1e1e" : "#ffffff") + ";");
+    let iframe = win.document.createElementNS(NS, "iframe");
+    iframe.setAttribute("style", "width:100%;height:100%;border:0;display:block;background:transparent;");
+    iframe.srcdoc = this.builderPageHTML(
+      this.rootURI + "content/core.bundle.js",
+      this.rootURI + "content/editor.bundle.js",
+      this.rootURI + "content/builder-app.js",
+      dark,
+    );
+    panel.appendChild(iframe);
+    overlay.appendChild(panel);
+    // Click the dimmed backdrop (not the panel) to close.
+    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) this.closeTemplateBuilder(win); });
+    win.document.documentElement.appendChild(overlay);
+
+    let self = this;
+    let bridge = {
+      insert: (text) => self.builderInsert(rec, win, text),
+      save: (name, text) => self.builderSaveTemplate(win, name, text),
+      close: () => self.closeTemplateBuilder(win),
+    };
+    // Poll the (srcdoc-swapped) contentWindow for the app entry + both bundles,
+    // then start it — same robustness trick the note editor iframe uses.
+    let tries = 0;
+    let waitForApp = function () {
+      let fw = iframe.contentWindow;
+      if (fw && fw.startBuilder && fw.ZONCore && fw.ZOSEditorLib) {
+        try { fw.startBuilder({ previewCtx: ctx, bridge, dark }); }
+        catch (e) { self.log("startBuilder failed: " + e); }
+        return;
+      }
+      if (tries++ < 250) { try { win.setTimeout(waitForApp, 20); } catch (e) {} }
+      else self.log("builder: app never appeared");
+    };
+    waitForApp();
+  },
+
+  closeTemplateBuilder(win) {
+    try { let o = win.document.getElementById("zon-builder-overlay"); if (o) o.remove(); } catch (e) {}
+  },
+
+  // Build preview data for the selected item; null when nothing usable is selected
+  // (the builder app then falls back to ZONCore's bundled sample data).
+  async gatherPreviewContext(win, item) {
+    if (!item) return null;
+    try {
+      let citekey = this.getCitekey(item) || "";
+      let bibliography = "";
+      try { bibliography = await this.getBibliography(item); } catch (e) {}
+      let itemData = win.ZONCore.buildItemData(item, {
+        citekey, bibliography,
+        importDate: new Date().toISOString(),
+        pdfAttachmentKey: this.primaryPdfKey(item),
+      });
+      let annotations = this.gatherAnnotations(item, win);
+      return { itemData, annotations, citekey, attachmentFolder: this.attachmentFolder() };
+    } catch (e) { this.log("gatherPreviewContext failed: " + e); return null; }
+  },
+
+  // The srcdoc page: minimal markup + styles, then the three bundles (absolute
+  // jar: URLs — Gecko loads <script src> from jar: fine, even though it won't
+  // navigate the iframe document itself to jar:). builder-app.js builds the UI.
+  builderPageHTML(coreURL, edURL, appURL, dark) {
+    let bg = dark ? "#1e1e1e" : "#ffffff";
+    let fg = dark ? "#e6e6e6" : "#1a1a1a";
+    let muted = dark ? "#9aa0a6" : "#666";
+    let border = dark ? "#3a3a3a" : "#ddd";
+    let pane = dark ? "#252526" : "#f6f6f6";
+    let accent = "#7048e8";
+    let css = "html,body{margin:0;height:100%;background:" + bg + ";color:" + fg + ";font:13px/1.4 -apple-system,system-ui,sans-serif;}"
+      + "#zon-builder-root{display:flex;flex-direction:column;height:100%;}"
+      + ".b-header{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid " + border + ";}"
+      + ".b-title{font-weight:600;font-size:14px;}.b-sub{color:" + muted + ";font-size:12px;flex:1;}"
+      + ".b-x{margin-left:auto;border:0;background:transparent;color:" + muted + ";font-size:15px;cursor:pointer;}"
+      + ".b-body{flex:1;display:flex;min-height:0;}"
+      + ".b-palette{width:200px;border-right:1px solid " + border + ";overflow:auto;padding:8px;background:" + pane + ";}"
+      + ".b-pal-head{font-weight:600;color:" + muted + ";font-size:11px;text-transform:uppercase;margin:10px 2px 4px;}"
+      + ".b-pal-group{display:flex;flex-wrap:wrap;gap:4px;}"
+      + ".b-chip{border:1px solid " + border + ";background:" + bg + ";color:" + fg + ";border-radius:5px;padding:3px 7px;font-size:11px;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}"
+      + ".b-chip:hover{border-color:" + accent + ";color:" + accent + ";}"
+      + ".b-editor,.b-preview{flex:1;display:flex;flex-direction:column;min-width:0;}"
+      + ".b-editor{border-right:1px solid " + border + ";}"
+      + ".b-colhead{font-weight:600;color:" + muted + ";font-size:11px;text-transform:uppercase;padding:8px 12px;display:flex;align-items:center;gap:8px;}"
+      + ".b-editor-host{flex:1;min-height:0;overflow:auto;}.cm-editor{height:100%;}"
+      + ".b-kind{font-weight:500;text-transform:none;color:" + accent + ";border:1px solid " + accent + ";border-radius:4px;padding:0 6px;font-size:10px;}"
+      + ".b-kind-err{color:#d33;border-color:#d33;}"
+      + ".b-preview-out{flex:1;margin:0;padding:10px 14px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:12px/1.5 ui-monospace,Menlo,monospace;}"
+      + ".b-preview-out.b-err{color:#d33;}"
+      + ".b-footer{display:flex;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid " + border + ";background:" + pane + ";}"
+      + ".b-name-label{color:" + muted + ";}.b-name{border:1px solid " + border + ";border-radius:5px;padding:4px 8px;background:" + bg + ";color:" + fg + ";width:160px;}"
+      + ".b-btn{border:1px solid " + border + ";background:" + bg + ";color:" + fg + ";border-radius:6px;padding:5px 12px;cursor:pointer;}"
+      + ".b-btn:hover{border-color:" + accent + ";}.b-primary{background:" + accent + ";color:#fff;border-color:" + accent + ";}"
+      + ".b-status{margin-left:auto;color:" + muted + ";}.b-status.b-err{color:#d33;}";
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><style>' + css + '</style></head>'
+      + '<body><div id="zon-builder-root"></div>'
+      + '<script src="' + coreURL + '"></scr' + 'ipt>'
+      + '<script src="' + edURL + '"></scr' + 'ipt>'
+      + '<script src="' + appURL + '"></scr' + 'ipt>'
+      + '</body></html>';
+  },
+
+  // Bridge OUT (1): insert the builder's rendered output (a live %% zon %% block,
+  // or a rendered note) into the active note editor at the cursor.
+  builderInsert(rec, win, text) {
+    if (!rec || !rec.view || !rec.lib) throw new Error("no active note editor");
+    rec.lib.insertAtCursor(rec.view, "\n" + String(text || "").trim() + "\n");
+  },
+
+  // Bridge OUT (2): write the builder's template SOURCE to the Templates folder
+  // (idempotent — confirms before overwriting), then refresh the template list so
+  // it's immediately usable in the Insert dropdown.
+  async builderSaveTemplate(win, name, text) {
+    let safe = String(name || "").trim().replace(/\.md$/i, "").replace(/[\/\\:*?"<>|]+/g, "-");
+    if (!safe) throw new Error("empty name");
+    let dir = this.templatesDir();
+    try { await IOUtils.makeDirectory(dir, { ignoreExisting: true }); } catch (e) {}
+    let path = PathUtils.join(dir, safe + ".md");
+    if (await IOUtils.exists(path)) {
+      let ok = Services.prompt.confirm(win, "Obsidian Notepad", this.t("msg.builderOverwrite", { name: safe }));
+      if (!ok) return "Save cancelled";
+    }
+    await IOUtils.writeUTF8(path, String(text || ""));
+    try { await this.refreshTemplates(); } catch (e) {}
+    return this.t("status.templateSaved", { name: safe });
   },
 
   // Convert a legacy annotation dump in the current note into a live block,
