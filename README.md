@@ -148,6 +148,7 @@ Copy `.env.example` to `.env` and set your Zotero path for `start` / `test:zoter
 Trying the beta? **First impressions, questions, and ideas** are very welcome in
 [**GitHub Discussions**](https://github.com/Acatechnic/obsidian-notepad-for-zotero/discussions);
 clear, reproducible bugs are best as [Issues](https://github.com/Acatechnic/obsidian-notepad-for-zotero/issues).
+Curious where it's heading? See the [**Roadmap**](ROADMAP.md).
 
 ## Contributing
 
