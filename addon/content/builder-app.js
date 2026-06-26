@@ -70,11 +70,15 @@
     Object.keys(templates).sort().forEach(function (n) { addOpt("t:" + n, "Edit: " + n); });
     var nameInput = el("input", "b-name"); nameInput.type = "text"; nameInput.value = "my-template";
     var saveBtn = el("button", "b-btn", "Save to folder");
-    var insertBtn = el("button", "b-btn b-primary", "Insert into note");
+    // No note yet → "Create note"; an open note → "Insert into note".
+    var createBtn = opts.canCreate ? el("button", "b-btn b-primary", "Create note") : null;
+    var insertBtn = opts.canInsert ? el("button", "b-btn" + (opts.canCreate ? "" : " b-primary"), "Insert into note") : null;
     var closeBtn = el("button", "b-btn", "Close");
     var status = el("span", "b-status");
-    footer.append(el("span", "b-name-label", "Start:"), startSel,
-      el("span", "b-name-label", "Save as:"), nameInput, saveBtn, insertBtn, closeBtn, status);
+    footer.append(el("span", "b-name-label", "Start:"), startSel, el("span", "b-name-label", "Save as:"), nameInput, saveBtn);
+    if (createBtn) footer.append(createBtn);
+    if (insertBtn) footer.append(insertBtn);
+    footer.append(closeBtn, status);
 
     root.append(header, body, footer);
 
@@ -320,12 +324,24 @@
     // ---- actions ------------------------------------------------------------
     function flash(msg, isErr) { status.textContent = msg; status.className = "b-status" + (isErr ? " b-err" : ""); }
     function doClose() { try { Ed.destroy && Ed.destroy(view); } catch (e) {} if (bridge.close) bridge.close(); }
-    insertBtn.addEventListener("click", function () {
+    if (insertBtn) insertBtn.addEventListener("click", function () {
       var text = ""; try { text = Ed.getDoc(view) || ""; } catch (e) {}
       var r = Core.previewTemplate(text, ctx);
       if (r.error) { flash("Fix the template error first", true); return; }
       if (!bridge.insert) return;
       Promise.resolve(bridge.insert(r.raw)).then(function () { flash("Inserted into the note"); }, function (e) { flash("Insert failed: " + e, true); });
+    });
+    if (createBtn) createBtn.addEventListener("click", function () {
+      var text = ""; try { text = Ed.getDoc(view) || ""; } catch (e) {}
+      var r = Core.previewTemplate(text, ctx);
+      if (r.error) { flash("Fix the template error first", true); return; }
+      if (!bridge.createNote) return;
+      flash("Creating note…");
+      // Pass the TEMPLATE SOURCE — the plugin renders it into the new note file.
+      Promise.resolve(bridge.createNote(text)).then(
+        function () { flash("Note created ✓"); setTimeout(doClose, 700); },
+        function (e) { flash("Create failed: " + e, true); }
+      );
     });
     saveBtn.addEventListener("click", function () {
       var name = (nameInput.value || "").trim().replace(/\.md$/i, "");

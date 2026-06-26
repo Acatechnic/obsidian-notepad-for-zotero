@@ -398,6 +398,8 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     "status.templateSaved": "Saved template ‘{name}’ to your Templates folder",
     "msg.builderOverwrite": "A template named ‘{name}.md’ already exists. Overwrite it?",
     "btn.createNote": "Create note",
+    "btn.buildNote": "Build a note…",
+    "tip.buildNote": "Open the Template Builder to compose this item's note and create it",
     "btn.rescan": "Rescan",
     "btn.setup": "Set up…",
     "btn.openSettings": "Open Settings",
@@ -1434,7 +1436,11 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     let noteTplSel = h("select"); noteTplSel.title = this.t("tip.noteTpl");
     let createBtn = h("button", "zon-primary"); createBtn.textContent = this.t("btn.createNote");
     let rescanBtn = h("button"); rescanBtn.textContent = this.t("btn.rescan"); rescanBtn.title = this.t("tip.rescan");
+    let buildNoteBtn = h("button"); buildNoteBtn.textContent = this.t("btn.buildNote"); buildNoteBtn.title = this.t("tip.buildNote");
     createRow.append(noteTplSel, createBtn, rescanBtn);
+    // The Template Builder is experimental — offer "Build a note…" here only when
+    // it's enabled (matches the toolbar button's gating).
+    if (this.experimentalEnabled()) createRow.append(buildNoteBtn);
     banner.append(bannerText, createRow);
 
     // First-run / not-configured empty state. Shown (instead of the editor +
@@ -1489,6 +1495,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     createBtn.addEventListener("click", () =>
       this.createNote(rec, rec.noteTplSel && rec.noteTplSel.value)
         .catch((e) => this.log("create failed: " + e)));
+    buildNoteBtn.addEventListener("click", () => { try { this.openTemplateBuilder(win, rec); } catch (e) { this.log("openTemplateBuilder failed: " + e); } });
     rescanBtn.addEventListener("click", async () => {
       try {
         rescanBtn.disabled = true;
@@ -2075,6 +2082,48 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
       this.log("writeNoteForItem failed: " + e);
       return { status: "error", error: String(e) };
     }
+  },
+
+  // Like writeNoteForItem, but renders from raw template TEXT (the Template
+  // Builder's composed template) rather than a named template — so the builder can
+  // create a note for an item that doesn't have one yet. Same safety + linking.
+  async writeNoteFromText(win, item, templateText) {
+    if (!item) return { status: "no-item" };
+    try {
+      if (!win.ZONCore) await this.injectCore(win);
+      let citekey = this.getCitekey(item);
+      if (!citekey) return { status: "no-citekey" };
+      let filename = this.expectedNoteFilename(win, item);
+      let dir = this.notesDir();
+      let path = PathUtils.join(dir, filename);
+      if (!win.ZONCore.isUnder(path, dir)) return { status: "outside", path };
+      if (await IOUtils.exists(path)) return { status: "exists", path };
+      let md = await this.renderDocument(win, item, String(templateText || ""));
+      try { md = win.ZONCore.ensureZoteroLink(md, win.ZONCore.zoteroSelectURI(item)); } catch (e) {}
+      await IOUtils.makeDirectory(PathUtils.parent(path), { createAncestors: true });
+      await this.safeWrite(path, md);
+      if (this.index) this.index.set(item.key, path);
+      this.log("created note from builder " + path);
+      return { status: "created", path };
+    } catch (e) {
+      this.log("writeNoteFromText failed: " + e);
+      return { status: "error", error: String(e) };
+    }
+  },
+
+  // Bridge OUT (3): create THIS item's note from the builder's composed template,
+  // then re-render the pane to show it. Throws (with a message) on any problem so
+  // the builder can surface it.
+  async builderCreateNote(rec, win, templateText) {
+    let item = (rec && rec.item) || this.selectedRegularItems(win)[0];
+    if (!item) throw new Error("no item selected");
+    let r = await this.writeNoteFromText(win, item, templateText);
+    if (r.status === "no-citekey") throw new Error("this item has no citekey");
+    if (r.status === "outside") throw new Error("would write outside your notes folder");
+    if (r.status === "exists") throw new Error("a note already exists for this item");
+    if (r.status === "error") throw new Error(r.error || "create failed");
+    try { if (rec && rec.wrap) await this.renderInto(rec.wrap, item); } catch (e) {}
+    return r.path;
   },
 
   // Create @<citekey>.md from the chosen template (any template — a whole-note
@@ -2779,15 +2828,20 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     let bridge = {
       insert: (text) => self.builderInsert(rec, win, text),
       save: (name, text) => self.builderSaveTemplate(win, name, text),
+      createNote: (text) => self.builderCreateNote(rec, win, text),
       close: () => self.closeTemplateBuilder(win),
     };
+    // No linked note yet → the builder offers "Create note"; an open note editor →
+    // it offers "Insert into note".
+    let canInsert = !!(rec && rec.view && rec.path);
+    let canCreate = !canInsert && !!item;
     // Poll the (srcdoc-swapped) contentWindow for the app entry + both bundles,
     // then start it — same robustness trick the note editor iframe uses.
     let tries = 0;
     let waitForApp = function () {
       let fw = iframe.contentWindow;
       if (fw && fw.startBuilder && fw.ZONCore && fw.ZOSEditorLib) {
-        try { fw.startBuilder({ previewCtx: ctx, bridge, dark, templates }); }
+        try { fw.startBuilder({ previewCtx: ctx, bridge, dark, templates, canInsert, canCreate }); }
         catch (e) { self.log("startBuilder failed: " + e); }
         return;
       }
