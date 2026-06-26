@@ -23,6 +23,9 @@
     var bridge = opts.bridge || {};
     var dark = !!opts.dark;
     var templates = opts.templates || {};
+    // Per-annotation format names for the block configurator's Named dropdown
+    // (built-ins + the user's own formats), supplied by the plugin.
+    var formatNames = (opts.formatNames && opts.formatNames.length) ? opts.formatNames : (Core.NAMED_FORMATS || []);
     var ctx = (opts.previewCtx && opts.previewCtx.itemData)
       ? opts.previewCtx
       : { itemData: Core.SAMPLE_ITEM, annotations: Core.SAMPLE_ANNOTATIONS, citekey: (Core.SAMPLE_ITEM || {}).citekey };
@@ -187,7 +190,7 @@
       function renderFmtBody() {
         fmtBody.textContent = "";
         if (cfgState.mode === "named") {
-          selectInto(fmtBody, "Format", (Core.NAMED_FORMATS || []).map(function (n) { return [n, n]; }), cfgState.format, function (v) { cfgState.format = v; onChange(); });
+          selectInto(fmtBody, "Format", formatNames.map(function (n) { return [n, n]; }), cfgState.format, function (v) { cfgState.format = v; onChange(); });
         } else {
           selectInto(fmtBody, "Style", Core.BLOCK_STYLES || [], cfgState.style, function (v) { cfgState.style = v; onChange(); });
           var pWrap = el("div", "b-checks");
@@ -285,14 +288,18 @@
       var c = Core.paletteContextAt(cur, pos);
       var inAnnBlock = c.context === "block" && c.blockKind === "annotations";
       var b = inAnnBlock ? Core.blockConfigAt(cur, pos) : null;
-      // include the block's identity so moving between two annotation blocks rebuilds
-      var key = c.context + "/" + (c.blockKind || "") + "/" + (b ? b.openStart : "");
+      // The whole template can BE a per-annotation format body (no frontmatter, no
+      // block) — then the body is about one highlight, so offer highlight variables.
+      var isFormatDoc = c.context === "body" && Core.templateKind && Core.templateKind(cur) === "format";
+      // include block identity + format-ness so the panel rebuilds when they change
+      var key = c.context + "/" + (c.blockKind || "") + "/" + (b ? b.openStart : "") + "/" + (isFormatDoc ? "fmt" : "");
       if (!force && key === lastCtxKey) return;
       lastCtxKey = key;
       side.textContent = "";
       side.append(el("div", "b-ctx", c.context === "frontmatter" ? "Cursor in frontmatter"
         : inAnnBlock ? "Editing the annotation block at your cursor"
         : c.context === "block" ? "Cursor inside a field block"
+        : isFormatDoc ? "Editing a per-highlight format"
         : "Cursor in the note body"));
       if (c.context === "frontmatter") {
         buildFrontmatterPanel();
@@ -301,6 +308,8 @@
         buildConfigurator("edit");
       } else if (c.context === "block") {
         group("Item variables", Core.ITEM_VARIABLES || [], vText, vLabel);
+      } else if (isFormatDoc) {
+        group("Highlight variables", Core.BLOCK_VARIABLES || [], vText, vLabel);
       } else {
         side.append(el("div", "b-pal-head", "Add annotation block"));
         buildConfigurator("add");

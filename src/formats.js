@@ -51,14 +51,20 @@ export function composeFormat(style, parts) {
     : String(parts == null ? "" : parts).split(",").map((s) => s.trim()).filter(Boolean);
   const p = { page: list.indexOf("page") !== -1, comment: list.indexOf("comment") !== -1, tags: list.indexOf("tags") !== -1 };
   const tagBit = p.tags ? " {% for t in tags %}#{{t}} {% endfor %}" : "";
+  // Image (area) annotations have no `text` — they carry an `imageBaseName`. Emit
+  // an Obsidian embed for those and the (optionally quoted) text otherwise, mirroring
+  // the built-in named formats so composed formats don't blank out image highlights.
+  const body = (quoted) =>
+    "{% if imageBaseName %}![[{{attachmentFolder}}/{{citekey}}/{{imageBaseName}}]]{% else %}"
+    + (quoted ? '"{{text}}"' : "{{text}}") + "{% endif %}";
   if (style === "list") {
-    return { item: "- " + (p.page ? "[p.{{page}}]({{link}}) " : "") + '"{{text}}"' + (p.comment ? "{% if comment %} — *{{comment}}*{% endif %}" : "") + tagBit, sep: "\n" };
+    return { item: "- " + (p.page ? "[p.{{page}}]({{link}}) " : "") + body(true) + (p.comment ? "{% if comment %} — *{{comment}}*{% endif %}" : "") + tagBit, sep: "\n" };
   }
   if (style === "callout") {
-    return { item: "> [!quote]" + (p.page ? " p.{{page}}" : "") + "\n> {{text}}" + tagBit + (p.comment ? "{% if comment %}\n>\n> {{comment}}{% endif %}" : ""), sep: "\n\n" };
+    return { item: "> [!quote]" + (p.page ? " p.{{page}}" : "") + "\n> " + body(false) + tagBit + (p.comment ? "{% if comment %}\n>\n> {{comment}}{% endif %}" : ""), sep: "\n\n" };
   }
   // quote (default)
-  return { item: "> {{text}}" + tagBit + (p.page ? "\n> — [p.{{page}}]({{link}})" : "") + (p.comment ? "\n{% if comment %}>\n> {{comment}}{% endif %}" : ""), sep: "\n\n" };
+  return { item: "> " + body(false) + tagBit + (p.page ? "\n> — [p.{{page}}]({{link}})" : "") + (p.comment ? "\n{% if comment %}>\n> {{comment}}{% endif %}" : ""), sep: "\n\n" };
 }
 
 export const FIELD_FORMATS = {

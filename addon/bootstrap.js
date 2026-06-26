@@ -2792,11 +2792,20 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     let ctx = await this.gatherPreviewContext(win, item);
     let dark = this.isDarkTheme(win, rec && rec.host);
     // Name → raw text map of existing templates, for the builder's "Edit existing".
+    // Plus the per-annotation format names (built-ins + custom, EXCLUDING field/
+    // section/custom directive templates) for the block configurator's dropdown.
     let templates = {};
+    let formatNames = [];
     try {
       await this.loadTemplates();
       let all = this.allTemplates(win) || {};
-      for (let name in all) { if (all[name] && typeof all[name].text === "string") templates[name] = all[name].text; }
+      for (let name in all) {
+        let t = all[name];
+        if (t && typeof t.text === "string") templates[name] = t.text;
+        let dk = t && t.defaults && t.defaults.kind;
+        if (t && t.kind === "format" && (!dk || dk === "annotations")) formatNames.push(name);
+      }
+      formatNames.sort();
     } catch (e) { this.log("builder: template list failed: " + e); }
 
     let NS = "http://www.w3.org/1999/xhtml";
@@ -2841,7 +2850,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     let waitForApp = function () {
       let fw = iframe.contentWindow;
       if (fw && fw.startBuilder && fw.ZONCore && fw.ZOSEditorLib) {
-        try { fw.startBuilder({ previewCtx: ctx, bridge, dark, templates, canInsert, canCreate }); }
+        try { fw.startBuilder({ previewCtx: ctx, bridge, dark, templates, formatNames, canInsert, canCreate }); }
         catch (e) { self.log("startBuilder failed: " + e); }
         return;
       }
@@ -2869,7 +2878,9 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
         pdfAttachmentKey: this.primaryPdfKey(item),
       });
       let annotations = this.gatherAnnotations(item, win);
-      return { itemData, annotations, citekey, attachmentFolder: this.attachmentFolder() };
+      // Pass the full format map so the preview can render the user's custom
+      // formats (and field formats), not just the built-ins.
+      return { itemData, annotations, citekey, attachmentFolder: this.attachmentFolder(), formats: this.formatMap(win) };
     } catch (e) { this.log("gatherPreviewContext failed: " + e); return null; }
   },
 

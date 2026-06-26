@@ -169,6 +169,15 @@ describe("annotation-block configurator engine", () => {
     expect(b2).toContain("— *core claim*");
   });
 
+  it("composed formats handle IMAGE annotations (embed, not empty quotes)", () => {
+    const IMG = [{ key: "IM", type: "image", attachmentKey: "PDF", pageLabel: "2", pageIndex: 1, sortIndex: "1", annotatedText: "", colourName: "yellow", imageBaseName: "doe-p2-IM.png" }];
+    for (const style of ["list", "quote", "callout"]) {
+      const body = renderBlockBody({ colour: "all", style: style, parts: "page" }, IMG, { citekey: "doe", attachmentFolder: "Refs" });
+      expect(body, style).toContain("![[Refs/doe/doe-p2-IM.png]]");
+      expect(body, style).not.toContain('""'); // no empty-text artefact
+    }
+  });
+
   it("a block renders via style+parts even with no named format available", () => {
     const body = renderBlockBody({ colour: "all", style: "callout", parts: "comment" }, SAMPLE_ANNOTATIONS, {});
     expect(body).toContain("> [!quote]");
