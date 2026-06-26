@@ -2836,7 +2836,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     let self = this;
     let bridge = {
       insert: (text) => self.builderInsert(rec, win, text),
-      save: (name, text) => self.builderSaveTemplate(win, name, text),
+      save: (name, text, setDefault) => self.builderSaveTemplate(win, name, text, setDefault),
       createNote: (text) => self.builderCreateNote(rec, win, text),
       close: () => self.closeTemplateBuilder(win),
     };
@@ -2939,6 +2939,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
       + ".b-name-label{color:" + muted + ";}.b-name{border:1px solid " + border + ";border-radius:5px;padding:4px 8px;background:" + bg + ";color:" + fg + ";width:160px;}"
       + ".b-btn{border:1px solid " + border + ";background:" + bg + ";color:" + fg + ";border-radius:6px;padding:5px 12px;cursor:pointer;}"
       + ".b-btn:hover{border-color:" + accent + ";}.b-primary{background:" + accent + ";color:#fff;border-color:" + accent + ";}"
+      + ".b-btn:disabled{opacity:0.4;cursor:not-allowed;border-color:" + border + ";background:" + bg + ";color:" + fg + ";}"
       + ".b-status{margin-left:auto;color:" + muted + ";}.b-status.b-err{color:#d33;}";
     return '<!DOCTYPE html><html><head><meta charset="utf-8"><style>' + css + '</style></head>'
       + '<body><div id="zon-builder-root"></div>'
@@ -2958,7 +2959,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
   // Bridge OUT (2): write the builder's template SOURCE to the Templates folder
   // (idempotent — confirms before overwriting), then refresh the template list so
   // it's immediately usable in the Insert dropdown.
-  async builderSaveTemplate(win, name, text) {
+  async builderSaveTemplate(win, name, text, setDefault) {
     let safe = String(name || "").trim().replace(/\.md$/i, "").replace(/[\/\\:*?"<>|]+/g, "-");
     if (!safe) throw new Error("empty name");
     let dir = this.templatesDir();
@@ -2970,7 +2971,9 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     }
     await IOUtils.writeUTF8(path, String(text || ""));
     try { await this.refreshTemplates(); } catch (e) {}
-    return this.t("status.templateSaved", { name: safe });
+    // Optionally make this the template "Create note" / "Build a note" uses by default.
+    if (setDefault) { try { Zotero.Prefs.set(this.PREF_DEFAULT_NOTE, safe, true); } catch (e) {} }
+    return this.t("status.templateSaved", { name: safe }) + (setDefault ? " — set as default" : "");
   },
 
   // Convert a legacy annotation dump in the current note into a live block,

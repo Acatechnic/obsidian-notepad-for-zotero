@@ -84,12 +84,15 @@
     Object.keys(templates).sort().forEach(function (n) { addOpt("t:" + n, "Edit: " + n); });
     var nameInput = el("input", "b-name"); nameInput.type = "text"; nameInput.value = "my-template";
     var saveBtn = el("button", "b-btn", "Save to folder");
+    var defaultLab = el("label", "b-toggle"); var defaultChk = doc.createElement("input"); defaultChk.type = "checkbox";
+    defaultLab.title = "Also make this the template Create/Build uses by default";
+    defaultLab.append(defaultChk, el("span", null, "default"));
     // No note yet → "Create note"; an open note → "Insert into note".
     var createBtn = opts.canCreate ? el("button", "b-btn b-primary", "Create note") : null;
     var insertBtn = opts.canInsert ? el("button", "b-btn" + (opts.canCreate ? "" : " b-primary"), "Insert into note") : null;
     var closeBtn = el("button", "b-btn", "Close");
     var status = el("span", "b-status");
-    footer.append(el("span", "b-name-label", "Start:"), startSel, el("span", "b-name-label", "Save as:"), nameInput, saveBtn);
+    footer.append(el("span", "b-name-label", "Start:"), startSel, el("span", "b-name-label", "Save as:"), nameInput, saveBtn, defaultLab);
     if (createBtn) footer.append(createBtn);
     if (insertBtn) footer.append(insertBtn);
     footer.append(closeBtn, status);
@@ -118,6 +121,13 @@
         ? "The template isn't valid yet — keep editing; the preview updates as you go.\n\n" + (r.preview || "")
         : (r.preview || "(empty)");
       previewOut.classList.toggle("b-err", !!r.error);
+      // Inserting a whole-note template mid-note is a foot-gun — only blocks/formats
+      // make sense to insert. (Use Create note / Save for whole-note templates.)
+      if (insertBtn) {
+        var isDoc = r.kind === "document";
+        insertBtn.disabled = isDoc;
+        insertBtn.title = isDoc ? "Whole-note templates can't be inserted into a note — use Save, or Create note from the empty state" : "";
+      }
     }
     function schedulePreview() { if (previewTimer) clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 180); }
 
@@ -431,7 +441,7 @@
       if (!name) { flash("Enter a template name", true); nameInput.focus(); return; }
       var text = ""; try { text = Ed.getDoc(view) || ""; } catch (e) {}
       if (!bridge.save) return;
-      Promise.resolve(bridge.save(name, text)).then(function (res) { flash(res || "Saved"); }, function (e) { flash("Save failed: " + e, true); });
+      Promise.resolve(bridge.save(name, text, defaultChk.checked)).then(function (res) { flash(res || "Saved"); }, function (e) { flash("Save failed: " + e, true); });
     });
     closeBtn.addEventListener("click", doClose);
     closeX.addEventListener("click", doClose);
