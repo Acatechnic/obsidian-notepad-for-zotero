@@ -339,12 +339,15 @@ export function setImageEpoch(view, epoch) {
 // `readMode` renders links/headings inline (default on), `showFrontmatter` keeps
 // the YAML block visible (default on). `onOpenLink(href)` is called when a
 // rendered inline link is clicked.
-export function create({ parent, doc, onChange, editable = true, dark = false,
+export function create({ parent, doc, onChange, onCursor, editable = true, dark = false,
   showMarkers = false, readMode = true, showFrontmatter = true, vaultPath = "", imageEpoch = 0, onOpenLink } = {}) {
   const root = parent.getRootNode ? parent.getRootNode() : undefined;
 
   const updateListener = EditorView.updateListener.of((u) => {
     if (u.docChanged && onChange) onChange(u.state.doc.toString());
+    // Fire on any caret/selection move (and after edits) so a context-aware UI
+    // (the Template Builder palette) can react to where the cursor now sits.
+    if ((u.docChanged || u.selectionSet) && onCursor) onCursor(u.state.selection.main.head);
   });
 
   // Click a rendered link (its label carries data-zon-href) → open it, instead of
@@ -416,6 +419,12 @@ export function getDoc(view) {
   return view.state.doc.toString();
 }
 
+// Current caret offset (head of the main selection) — the Template Builder reads
+// it to classify where the cursor sits for its context-aware palette.
+export function getCursor(view) {
+  return view && view.state ? view.state.selection.main.head : 0;
+}
+
 // Insert text at the current cursor (replacing any selection), then place the
 // cursor after it and focus. Used by the "insert block" commands.
 export function insertAtCursor(view, text) {
@@ -425,6 +434,23 @@ export function insertAtCursor(view, text) {
     changes: { from: sel.from, to: sel.to, insert: text },
     selection: { anchor: sel.from + (text ? text.length : 0) },
   });
+  view.focus();
+}
+
+// Replace a specific range [from, to) — the builder's block configurator uses it
+// to rewrite a `%% zon … %%` marker in place as you change the controls, without
+// disturbing the rest of the document or the undo history.
+export function replaceRange(view, from, to, text) {
+  if (!view) return;
+  view.dispatch({ changes: { from: from, to: to, insert: text || "" } });
+}
+
+// Place the caret at an offset (and focus). The builder uses it to keep the
+// cursor inside the frontmatter after add/remove, so the panel stays in context.
+export function setCursor(view, pos) {
+  if (!view) return;
+  const p = Math.max(0, Math.min(pos | 0, view.state.doc.length));
+  view.dispatch({ selection: { anchor: p } });
   view.focus();
 }
 

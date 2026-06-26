@@ -5,19 +5,19 @@
 // (bootstrap.js) polls for window.startBuilder and calls it once with the preview
 // context, the existing-templates map, and a bridge of privileged callbacks.
 //
-// Flow (the guided layer): a START step asks WHAT you're making — a note
-// template, a highlight format, or edit an existing one. That choice loads a
-// clean starter, scopes the palette, and shows a COMPOSE form whose tick-boxes
-// GENERATE the template for you. The live preview (ZONCore.previewTemplate, the
-// same engine the write paths use) means what you see is what Insert/Save yields.
+// Design: pure editor + a CONTEXT-AWARE palette. You compose freely in the
+// editor; the palette watches where the cursor sits (via ZONCore.paletteContextAt)
+// and offers only what's valid there — frontmatter fields (you name the keys),
+// item variables, highlight variables inside an annotations block, and one-click
+// UPDATABLE field blocks (citation/abstract/title/authors) + annotation blocks in
+// the body. Live preview throughout (the same engine the write paths use).
 
 (function () {
   "use strict";
 
   window.startBuilder = function (opts) {
     opts = opts || {};
-    var Core = window.ZONCore;
-    var Ed = window.ZOSEditorLib;
+    var Core = window.ZONCore, Ed = window.ZOSEditorLib;
     if (!Core || !Ed || !Core.previewTemplate) return false;
 
     var bridge = opts.bridge || {};
@@ -30,287 +30,317 @@
 
     var doc = document;
     var root = doc.getElementById("zon-builder-root") || doc.body;
+    root.textContent = "";
     var el = function (tag, cls, text) {
       var n = doc.createElement(tag);
       if (cls) n.className = cls;
       if (text != null) n.textContent = text;
       return n;
     };
-    var view = null; // the CM editor, created when the workspace opens
 
-    // ---- shared chrome: header + footer -------------------------------------
-    var subText = usingSample
+    // ---- header -------------------------------------------------------------
+    var header = el("div", "b-header");
+    header.append(el("span", "b-title", "Template Builder"));
+    header.append(el("span", "b-sub", usingSample
       ? "previewing with sample data (no item selected)"
-      : "previewing: " + (ctx.itemData.title || ctx.citekey || "selected item");
+      : "previewing: " + (ctx.itemData.title || ctx.citekey || "selected item")));
+    var closeX = el("button", "b-x", "✕"); closeX.title = "Close (Esc)";
+    header.append(closeX);
 
-    var doClose = function () { try { Ed.destroy && view && Ed.destroy(view); } catch (e) {} if (bridge.close) bridge.close(); };
+    // ---- body: palette | editor | preview -----------------------------------
+    var body = el("div", "b-body");
+    var side = el("div", "b-side");
+    var editorCol = el("div", "b-editor");
+    var previewCol = el("div", "b-preview");
+    body.append(side, editorCol, previewCol);
+
+    var editorHost = el("div", "b-editor-host");
+    editorCol.append(el("div", "b-colhead", "Template"), editorHost);
+
+    var kindBadge = el("span", "b-kind");
+    var pHead = el("div", "b-colhead"); pHead.append(doc.createTextNode("Live preview "), kindBadge);
+    var previewOut = el("pre", "b-preview-out");
+    previewCol.append(pHead, previewOut);
+
+    // ---- footer -------------------------------------------------------------
+    var footer = el("div", "b-footer");
+    var startSel = el("select", "b-select"); startSel.title = "Replace the editor with a starting point";
+    var addOpt = function (v, t) { var o = el("option"); o.value = v; o.textContent = t; startSel.append(o); };
+    addOpt("__note", "Note starter"); addOpt("__format", "Highlight-format starter"); addOpt("__blank", "Blank");
+    Object.keys(templates).sort().forEach(function (n) { addOpt("t:" + n, "Edit: " + n); });
+    var nameInput = el("input", "b-name"); nameInput.type = "text"; nameInput.value = "my-template";
+    var saveBtn = el("button", "b-btn", "Save to folder");
+    var insertBtn = el("button", "b-btn b-primary", "Insert into note");
+    var closeBtn = el("button", "b-btn", "Close");
+    var status = el("span", "b-status");
+    footer.append(el("span", "b-name-label", "Start:"), startSel,
+      el("span", "b-name-label", "Save as:"), nameInput, saveBtn, insertBtn, closeBtn, status);
+
+    root.append(header, body, footer);
+
+    // ---- editor -------------------------------------------------------------
+    var view = Ed.create({
+      parent: editorHost, doc: Core.STARTER_NOTE, dark: dark,
+      readMode: false, showMarkers: true, showFrontmatter: true,
+      onChange: function () { schedulePreview(); renderPalette(); },
+      onCursor: function () { renderPalette(); },
+    });
+
+    // ---- live preview -------------------------------------------------------
+    var previewTimer = null;
+    function renderPreview() {
+      var text = ""; try { text = Ed.getDoc(view) || ""; } catch (e) {}
+      var r = Core.previewTemplate(text, ctx);
+      kindBadge.textContent = r.kind === "document" ? "whole-note" : "per-highlight";
+      kindBadge.className = "b-kind" + (r.error ? " b-kind-err" : "");
+      previewOut.textContent = r.preview || "(empty)";
+      previewOut.classList.toggle("b-err", !!r.error);
+    }
+    function schedulePreview() { if (previewTimer) clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 180); }
+
+    // ---- context-aware palette ---------------------------------------------
+    function insert(text) {
+      try { Ed.insertAtCursor(view, text); } catch (e) {}
+      schedulePreview(); renderPalette(true);
+    }
+    function group(title, items, getText, getLabel) {
+      side.append(el("div", "b-pal-head", title));
+      var wrap = el("div", "b-pal-group");
+      items.forEach(function (it) {
+        var chip = el("button", "b-chip");
+        chip.append(el("span", "b-chip-l", getLabel(it)));
+        chip.title = getText(it);
+        chip.addEventListener("click", function () { insert(getText(it)); });
+        wrap.append(chip);
+      });
+      side.append(wrap);
+    }
+    var vText = function (v) { return v.token; }, vLabel = function (v) { return v.label || v.token; };
+    var tText = function (t) { return t.text; }, tLabel = function (t) { return t.label; };
+
+    // ---- annotation-block configurator state -------------------------------
+    var cfgState = { colours: [], tag: "", type: "", mode: "named", format: "quote", style: "quote", parts: ["page", "comment"], sync: "on" };
+    function toConfig(s) {
+      var cfg = { colour: s.colours.length ? s.colours.join(",") : "all", tag: s.tag || "", type: s.type || "", sync: s.sync };
+      if (s.mode === "compose") { cfg.style = s.style; cfg.parts = s.parts.join(","); } else { cfg.format = s.format; }
+      return cfg;
+    }
+    function configToState(c) {
+      var s = { colours: (c.colour && c.colour !== "all") ? c.colour.split(",") : [], tag: c.tag || "", type: c.type || "", sync: c.sync === "off" ? "off" : "on", format: "quote", style: "quote", parts: ["page", "comment"], mode: "named" };
+      if (c.style) { s.mode = "compose"; s.style = c.style; s.parts = (c.parts || "").split(",").filter(Boolean); }
+      else { s.mode = "named"; s.format = c.format || "quote"; }
+      return s;
+    }
+    // In edit mode, rewrite the block under the cursor live; in add mode the
+    // Insert button drops a fresh block. Re-finds the block each time so the range
+    // stays correct as the marker grows/shrinks.
+    function applyEdit() {
+      var cur = ""; try { cur = Ed.getDoc(view) || ""; } catch (e) {}
+      var pos = 0; try { pos = Ed.getCursor(view); } catch (e) {}
+      var b = Core.blockConfigAt(cur, pos);
+      if (!b) return;
+      try { Ed.replaceRange(view, b.openStart, b.openEnd, Core.annotationMarkerOpen(toConfig(cfgState))); } catch (e) {}
+      schedulePreview();
+    }
+
+    function buildConfigurator(mode) {
+      var onChange = mode === "edit" ? applyEdit : function () {};
+      // Colours (multi-select)
+      side.append(el("div", "b-pal-head", "Colours"));
+      var colWrap = el("div", "b-pal-group");
+      (Core.BLOCK_COLOURS || []).forEach(function (col) {
+        var on = cfgState.colours.indexOf(col) !== -1;
+        var chip = el("button", "b-chip b-col" + (on ? " b-on" : ""), col);
+        chip.addEventListener("click", function () {
+          var i = cfgState.colours.indexOf(col);
+          if (i === -1) cfgState.colours.push(col); else cfgState.colours.splice(i, 1);
+          chip.classList.toggle("b-on"); onChange();
+        });
+        colWrap.append(chip);
+      });
+      side.append(colWrap, el("div", "b-hint", cfgState.colours.length ? "" : "none selected = all colours"));
+
+      // Tags
+      side.append(el("div", "b-pal-head", "Filter by tag(s)"));
+      var tagIn = el("input", "b-name"); tagIn.type = "text"; tagIn.placeholder = "e.g. method, finding"; tagIn.value = cfgState.tag;
+      tagIn.style.width = "100%";
+      tagIn.addEventListener("input", function () { cfgState.tag = tagIn.value.replace(/\s/g, ""); onChange(); });
+      side.append(tagIn);
+
+      // Type
+      var typeSel = selectRow("Type", Core.BLOCK_TYPES || [], cfgState.type, function (v) { cfgState.type = v; onChange(); });
+
+      // Format: Named vs Compose
+      side.append(el("div", "b-pal-head", "Format"));
+      var modeWrap = el("div", "b-pal-group");
+      var fmtBody = el("div");
+      ["named", "compose"].forEach(function (mname) {
+        var b = el("button", "b-chip" + (cfgState.mode === mname ? " b-on" : ""), mname === "named" ? "Named" : "Compose");
+        b.addEventListener("click", function () { cfgState.mode = mname; renderFmtBody(); for (var k = 0; k < modeWrap.children.length; k++) modeWrap.children[k].classList.remove("b-on"); b.classList.add("b-on"); onChange(); });
+        modeWrap.append(b);
+      });
+      side.append(modeWrap, fmtBody);
+      function renderFmtBody() {
+        fmtBody.textContent = "";
+        if (cfgState.mode === "named") {
+          selectInto(fmtBody, "Format", (Core.NAMED_FORMATS || []).map(function (n) { return [n, n]; }), cfgState.format, function (v) { cfgState.format = v; onChange(); });
+        } else {
+          selectInto(fmtBody, "Style", Core.BLOCK_STYLES || [], cfgState.style, function (v) { cfgState.style = v; onChange(); });
+          var pWrap = el("div", "b-checks");
+          (Core.BLOCK_PARTS || []).forEach(function (p) {
+            var lab = el("label", "b-check");
+            var cb = doc.createElement("input"); cb.type = "checkbox"; cb.checked = cfgState.parts.indexOf(p[0]) !== -1;
+            cb.addEventListener("change", function () {
+              var i = cfgState.parts.indexOf(p[0]);
+              if (cb.checked && i === -1) cfgState.parts.push(p[0]); else if (!cb.checked && i !== -1) cfgState.parts.splice(i, 1);
+              onChange();
+            });
+            lab.append(cb, el("span", null, p[1])); pWrap.append(lab);
+          });
+          fmtBody.append(pWrap);
+        }
+      }
+      renderFmtBody();
+
+      // Updates (sync)
+      selectRow("Updates", [["on", "live (re-syncs from Zotero)"], ["off", "static (frozen snapshot)"]], cfgState.sync, function (v) { cfgState.sync = v; onChange(); });
+
+      if (mode === "add") {
+        var ins = el("button", "b-btn b-primary b-gen", "Insert annotation block");
+        ins.addEventListener("click", function () { insert(Core.annotationBlockText(toConfig(cfgState))); });
+        side.append(ins);
+      } else {
+        side.append(el("div", "b-hint", "Editing the block at your cursor — changes apply live."));
+      }
+    }
+    // ---- frontmatter field builder (add / remove) --------------------------
+    // Apply a frontmatter change, keeping the cursor in the frontmatter so the
+    // panel stays put. Replaces just the frontmatter region when it existed.
+    function applyFm(newDoc) {
+      var doc0 = ""; try { doc0 = Ed.getDoc(view) || ""; } catch (e) {}
+      var r = Core.frontmatterRange ? Core.frontmatterRange(doc0) : null;
+      if (r) { var nr = Core.frontmatterRange(newDoc); try { Ed.replaceRange(view, 0, r.end, newDoc.slice(0, nr.end)); } catch (e) {} }
+      else { try { Ed.setDoc(view, newDoc); } catch (e) {} }
+      var after = ""; try { after = Ed.getDoc(view) || ""; } catch (e) {}
+      var nr2 = Core.frontmatterRange(after);
+      try { Ed.setCursor(view, nr2 ? nr2.start + nr2.fence1.length : 0); } catch (e) {}
+      schedulePreview(); renderPalette(true);
+    }
+    function buildFrontmatterPanel() {
+      side.append(el("div", "b-pal-head", "Add a field"));
+      var keyIn = el("input", "b-name"); keyIn.type = "text"; keyIn.placeholder = "field name (e.g. Topics)"; keyIn.style.width = "100%";
+      side.append(keyIn);
+      var valBox = el("div");
+      var valSel = selectInto(valBox, "Value", (Core.FRONTMATTER_VALUES || []).map(function (v) { return [v.id, v.label]; }), "title", function () { syncCustom(); });
+      side.append(valBox);
+      var customIn = el("input", "b-name"); customIn.type = "text"; customIn.placeholder = 'e.g. "{{itemType}}"'; customIn.style.width = "100%"; customIn.style.display = "none"; customIn.style.marginTop = "4px";
+      side.append(customIn);
+      function syncCustom() { customIn.style.display = valSel.value === "custom" ? "" : "none"; }
+      syncCustom();
+      var addBtn = el("button", "b-btn b-primary b-gen", "Add field");
+      addBtn.addEventListener("click", function () {
+        var cur = ""; try { cur = Ed.getDoc(view) || ""; } catch (e) {}
+        var v = (Core.FRONTMATTER_VALUES || []).filter(function (x) { return x.id === valSel.value; })[0];
+        applyFm(Core.addFrontmatterField(cur, Core.frontmatterFieldText(keyIn.value, v, customIn.value)));
+      });
+      side.append(addBtn);
+
+      var cur = ""; try { cur = Ed.getDoc(view) || ""; } catch (e) {}
+      var keys = Core.frontmatterFieldKeys(cur);
+      if (keys.length) {
+        side.append(el("div", "b-pal-head", "Fields in this note (✕ to remove)"));
+        var list = el("div", "b-pal-group");
+        keys.forEach(function (k) {
+          var chip = el("button", "b-chip");
+          chip.append(el("span", "b-chip-l", k), el("span", "b-rm", " ✕"));
+          chip.title = "Remove " + k;
+          chip.addEventListener("click", function () {
+            var d = ""; try { d = Ed.getDoc(view) || ""; } catch (e) {}
+            applyFm(Core.removeFrontmatterField(d, k));
+          });
+          list.append(chip);
+        });
+        side.append(list);
+      }
+      group("Item variables", Core.ITEM_VARIABLES || [], vText, vLabel);
+    }
+
+    function selectRow(label, pairs, value, onSet) { var box = el("div"); side.append(box); return selectInto(box, label, pairs, value, onSet); }
+    function selectInto(box, label, pairs, value, onSet) {
+      box.append(el("div", "b-pal-head", label));
+      var sel = el("select", "b-select"); sel.style.width = "100%";
+      pairs.forEach(function (p) { var o = el("option"); o.value = p[0]; o.textContent = p[1]; if (p[0] === value) o.selected = true; sel.append(o); });
+      sel.addEventListener("change", function () { onSet(sel.value); });
+      box.append(sel); return sel;
+    }
+
+    var lastCtxKey = null;
+    function renderPalette(force) {
+      var cur = ""; try { cur = Ed.getDoc(view) || ""; } catch (e) {}
+      var pos = 0; try { pos = Ed.getCursor(view); } catch (e) {}
+      var c = Core.paletteContextAt(cur, pos);
+      var inAnnBlock = c.context === "block" && c.blockKind === "annotations";
+      var b = inAnnBlock ? Core.blockConfigAt(cur, pos) : null;
+      // include the block's identity so moving between two annotation blocks rebuilds
+      var key = c.context + "/" + (c.blockKind || "") + "/" + (b ? b.openStart : "");
+      if (!force && key === lastCtxKey) return;
+      lastCtxKey = key;
+      side.textContent = "";
+      side.append(el("div", "b-ctx", c.context === "frontmatter" ? "Cursor in frontmatter"
+        : inAnnBlock ? "Editing the annotation block at your cursor"
+        : c.context === "block" ? "Cursor inside a field block"
+        : "Cursor in the note body"));
+      if (c.context === "frontmatter") {
+        buildFrontmatterPanel();
+      } else if (inAnnBlock) {
+        cfgState = configToState(b.config); // reflect the block under the cursor
+        buildConfigurator("edit");
+      } else if (c.context === "block") {
+        group("Item variables", Core.ITEM_VARIABLES || [], vText, vLabel);
+      } else {
+        side.append(el("div", "b-pal-head", "Add annotation block"));
+        buildConfigurator("add");
+        group("Updatable fields", Core.FIELD_BLOCKS || [], tText, tLabel);
+        group("Item variables", Core.ITEM_VARIABLES || [], vText, vLabel);
+      }
+    }
+
+    // ---- start-from ---------------------------------------------------------
+    startSel.addEventListener("change", function () {
+      var v = startSel.value;
+      var text = v === "__blank" ? ""
+        : v === "__format" ? Core.STARTER_FORMAT
+        : v.indexOf("t:") === 0 ? (templates[v.slice(2)] || "")
+        : Core.STARTER_NOTE;
+      try { Ed.setDoc(view, text); } catch (e) {}
+      renderPreview(); renderPalette(true);
+      try { view.focus(); } catch (e) {}
+    });
+
+    // ---- actions ------------------------------------------------------------
+    function flash(msg, isErr) { status.textContent = msg; status.className = "b-status" + (isErr ? " b-err" : ""); }
+    function doClose() { try { Ed.destroy && Ed.destroy(view); } catch (e) {} if (bridge.close) bridge.close(); }
+    insertBtn.addEventListener("click", function () {
+      var text = ""; try { text = Ed.getDoc(view) || ""; } catch (e) {}
+      var r = Core.previewTemplate(text, ctx);
+      if (r.error) { flash("Fix the template error first", true); return; }
+      if (!bridge.insert) return;
+      Promise.resolve(bridge.insert(r.raw)).then(function () { flash("Inserted into the note"); }, function (e) { flash("Insert failed: " + e, true); });
+    });
+    saveBtn.addEventListener("click", function () {
+      var name = (nameInput.value || "").trim().replace(/\.md$/i, "");
+      if (!name) { flash("Enter a template name", true); nameInput.focus(); return; }
+      var text = ""; try { text = Ed.getDoc(view) || ""; } catch (e) {}
+      if (!bridge.save) return;
+      Promise.resolve(bridge.save(name, text)).then(function (res) { flash(res || "Saved"); }, function (e) { flash("Save failed: " + e, true); });
+    });
+    closeBtn.addEventListener("click", doClose);
+    closeX.addEventListener("click", doClose);
     doc.addEventListener("keydown", function (e) { if (e.key === "Escape") doClose(); });
 
-    // ===================================================== START / TYPE CHOOSER
-    function renderChooser() {
-      root.textContent = "";
-      var header = el("div", "b-header");
-      header.append(el("span", "b-title", "Template Builder"));
-      header.append(el("span", "b-sub", subText));
-      var x = el("button", "b-x", "✕"); x.title = "Close (Esc)"; x.addEventListener("click", doClose);
-      header.append(x);
-
-      var wrap = el("div", "b-chooser");
-      wrap.append(el("div", "b-chooser-q", "What do you want to make?"));
-      var cards = el("div", "b-cards");
-      var card = function (title, desc, onClick) {
-        var c = el("div", "b-card");
-        c.append(el("div", "b-card-t", title));
-        c.append(el("div", "b-card-d", desc));
-        c.addEventListener("click", onClick);
-        return c;
-      };
-      cards.append(card("Note template",
-        "The whole file a new note is created from — frontmatter, your prose, and where highlights go.",
-        function () { renderWorkspace("note"); }));
-      cards.append(card("Highlight format",
-        "How each PDF highlight is written into a note — a list item, a blockquote, or a callout.",
-        function () { renderWorkspace("format"); }));
-      var names = Object.keys(templates).sort();
-      var editCard = card("Edit existing",
-        names.length ? "Open one of your " + names.length + " templates and tweak it." : "No saved templates yet.",
-        function () { if (names.length) renderWorkspace("edit"); });
-      if (!names.length) editCard.className += " b-card-off";
-      cards.append(editCard);
-      wrap.append(cards);
-
-      root.append(header, wrap);
-    }
-
-    // ===================================================== WORKSPACE
-    function renderWorkspace(mode) {
-      root.textContent = "";
-
-      // header (with a Back to chooser)
-      var header = el("div", "b-header");
-      var back = el("button", "b-back", "‹ Back"); back.title = "Choose a different type";
-      back.addEventListener("click", function () { try { Ed.destroy && view && Ed.destroy(view); } catch (e) {} view = null; renderChooser(); });
-      header.append(back, el("span", "b-title", titleFor(mode)), el("span", "b-sub", subText));
-      var x = el("button", "b-x", "✕"); x.title = "Close (Esc)"; x.addEventListener("click", doClose);
-      header.append(x);
-
-      // body: side (compose + palette) | editor | preview
-      var body = el("div", "b-body");
-      var side = el("div", "b-side");
-      var editorCol = el("div", "b-editor");
-      var previewCol = el("div", "b-preview");
-      body.append(side, editorCol, previewCol);
-
-      var editorHost = el("div", "b-editor-host");
-      editorCol.append(el("div", "b-colhead", "Template"), editorHost);
-
-      var kindBadge = el("span", "b-kind");
-      var pHead = el("div", "b-colhead"); pHead.append(doc.createTextNode("Live preview "), kindBadge);
-      var previewOut = el("pre", "b-preview-out");
-      previewCol.append(pHead, previewOut);
-
-      // footer
-      var footer = el("div", "b-footer");
-      var nameInput = el("input", "b-name"); nameInput.type = "text";
-      nameInput.placeholder = "template name"; nameInput.value = mode === "format" ? "my-format" : "my-note";
-      var saveBtn = el("button", "b-btn", "Save to folder");
-      var insertBtn = el("button", "b-btn b-primary", "Insert into note");
-      var closeBtn = el("button", "b-btn", "Close");
-      var status = el("span", "b-status");
-      footer.append(el("span", "b-name-label", "Save as:"), nameInput, saveBtn, insertBtn, closeBtn, status);
-
-      root.append(header, body, footer);
-
-      // initial doc
-      var initialDoc = mode === "format" ? Core.STARTER_FORMAT
-        : (mode === "edit" ? (templates[Object.keys(templates).sort()[0]] || "") : Core.STARTER_NOTE);
-
-      view = Ed.create({
-        parent: editorHost, doc: initialDoc, dark: dark,
-        readMode: false, showMarkers: true, showFrontmatter: true,
-        onChange: function () { schedulePreview(); },
-      });
-
-      // ---- compose / palette (left side) ----
-      buildSide(side, mode, function (text) { Ed.setDoc(view, text); renderPreview(); try { view.focus(); } catch (e) {} },
-        function (token) { try { Ed.insertAtCursor(view, token); view.focus(); } catch (e) {} schedulePreview(); });
-
-      // ---- live preview ----
-      var previewTimer = null;
-      function renderPreview() {
-        var text = ""; try { text = Ed.getDoc(view) || ""; } catch (e) {}
-        var r = Core.previewTemplate(text, ctx);
-        kindBadge.textContent = r.kind === "document" ? "whole-note" : "per-highlight";
-        kindBadge.className = "b-kind" + (r.error ? " b-kind-err" : "");
-        previewOut.textContent = r.preview || "(empty)";
-        previewOut.classList.toggle("b-err", !!r.error);
-      }
-      function schedulePreview() { if (previewTimer) clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 180); }
-      // expose so buildSide's generate can refresh immediately
-      renderWorkspace._render = renderPreview;
-      renderPreview();
-
-      // ---- actions ----
-      function flash(msg, isErr) { status.textContent = msg; status.className = "b-status" + (isErr ? " b-err" : ""); }
-      insertBtn.addEventListener("click", function () {
-        var text = ""; try { text = Ed.getDoc(view) || ""; } catch (e) {}
-        var r = Core.previewTemplate(text, ctx);
-        if (r.error) { flash("Fix the template error first", true); return; }
-        if (!bridge.insert) return;
-        Promise.resolve(bridge.insert(r.raw)).then(function () { flash("Inserted into the note"); }, function (e) { flash("Insert failed: " + e, true); });
-      });
-      saveBtn.addEventListener("click", function () {
-        var name = (nameInput.value || "").trim().replace(/\.md$/i, "");
-        if (!name) { flash("Enter a template name", true); nameInput.focus(); return; }
-        var text = ""; try { text = Ed.getDoc(view) || ""; } catch (e) {}
-        if (!bridge.save) return;
-        Promise.resolve(bridge.save(name, text)).then(function (res) { flash(res || "Saved"); }, function (e) { flash("Save failed: " + e, true); });
-      });
-      closeBtn.addEventListener("click", doClose);
-      try { view.focus(); } catch (e) {}
-    }
-
-    function titleFor(mode) {
-      return mode === "format" ? "Template Builder — highlight format"
-        : (mode === "edit" ? "Template Builder — edit" : "Template Builder — note template");
-    }
-
-    // ===================================================== LEFT SIDE
-    // setDoc(text) regenerates the editor from the compose form; insert(token)
-    // drops a palette chip at the cursor.
-    function buildSide(side, mode, setDoc, insert) {
-      side.textContent = "";
-
-      if (mode === "edit") {
-        side.append(el("div", "b-pal-head", "Open a template"));
-        var sel = el("select", "b-select");
-        Object.keys(templates).sort().forEach(function (n) { var o = el("option"); o.value = n; o.textContent = n; sel.append(o); });
-        sel.addEventListener("change", function () { setDoc(templates[sel.value] || ""); });
-        side.append(sel);
-      } else {
-        // ---- COMPOSE form ----
-        side.append(el("div", "b-pal-head", "Compose"));
-        var form = el("div", "b-form");
-        side.append(form);
-        var regenerate;
-
-        if (mode === "note") regenerate = buildNoteForm(form);
-        else regenerate = buildFormatForm(form);
-
-        var gen = el("button", "b-btn b-primary b-gen", "Generate template ↻");
-        gen.title = "Write the template from these choices (replaces the editor)";
-        gen.addEventListener("click", function () { setDoc(regenerate()); });
-        side.append(gen);
-        side.append(el("div", "b-hint", "Generate writes a fresh template from your choices. Then tweak it by hand or drop in pieces below — the preview updates live."));
-      }
-
-      // ---- palette (scoped) ----
-      var addGroup = function (title, items, getText, getLabel, getDesc) {
-        side.append(el("div", "b-pal-head", title));
-        var wrap = el("div", "b-pal-group");
-        items.forEach(function (it) {
-          var chip = el("button", "b-chip");
-          chip.append(el("span", "b-chip-l", getLabel(it)));
-          chip.title = getText(it) + (getDesc && getDesc(it) ? "  —  " + getDesc(it) : "");
-          chip.addEventListener("click", function () { insert(getText(it)); });
-          wrap.append(chip);
-        });
-        side.append(wrap);
-      };
-      var vText = function (v) { return v.token; }, vLabel = function (v) { return v.label || v.token; }, vDesc = function (v) { return v.token; };
-      if (mode === "format" || mode === "edit") addGroup("Highlight variables", Core.BLOCK_VARIABLES || [], vText, vLabel, vDesc);
-      if (mode === "note" || mode === "edit") addGroup("Item variables", Core.ITEM_VARIABLES || [], vText, vLabel, vDesc);
-      addGroup("Snippets", scopedSnippets(mode), function (s) { return s.text; }, function (s) { return s.label; });
-    }
-
-    function scopedSnippets(mode) {
-      var all = Core.BUILDER_SNIPPETS || [];
-      if (mode === "note") return all.filter(function (s) { return s.kind === "note" || s.kind === "block"; });
-      if (mode === "format") return all.filter(function (s) { return s.kind === "format"; });
-      return all;
-    }
-
-    // ---- the NOTE compose form: returns a regenerate() → template text -------
-    function buildNoteForm(form) {
-      var fieldChk = checkGroup(form, "Frontmatter fields", (Core.NOTE_FIELDS || []).map(function (f) {
-        return { id: f.id, label: f.label, on: ["title", "year", "authors", "journal", "tags"].indexOf(f.id) !== -1 };
-      }));
-      var incChk = checkGroup(form, "Include", [
-        { id: "openPdf", label: "“Open PDF” link", on: true },
-        { id: "citation", label: "Formatted citation", on: true },
-        { id: "abstract", label: "Abstract", on: false },
-        { id: "notes", label: "“Notes” heading", on: true },
-      ]);
-      var fmtSel = selectRow(form, "Highlight style", (Core.FORMAT_STYLES || []).map(function (s) { return [s.id, s.label]; }), "quote");
-      var routeSel = selectRow(form, "Highlights", [["single", "One block (all colours)"], ["colour", "Route by colour"]], "single");
-      var colWrap = checkGroup(form, "Colours to route", (Core.COLOUR_CHOICES || []).map(function (c) {
-        return { id: c, label: c, on: c === "yellow" || c === "blue" };
-      }));
-      colWrap.groupEl.style.display = "none";
-      routeSel.addEventListener("change", function () { colWrap.groupEl.style.display = routeSel.value === "colour" ? "" : "none"; });
-
-      return function () {
-        return Core.buildNoteTemplate({
-          fields: fieldChk(),
-          openPdf: incChk().indexOf("openPdf") !== -1,
-          citation: incChk().indexOf("citation") !== -1,
-          abstract: incChk().indexOf("abstract") !== -1,
-          notes: incChk().indexOf("notes") !== -1,
-          highlights: true,
-          byColour: routeSel.value === "colour",
-          colours: colWrap(),
-          highlightFormat: fmtSel.value,
-        });
-      };
-    }
-
-    // ---- the FORMAT compose form -------------------------------------------
-    function buildFormatForm(form) {
-      var styleSel = selectRow(form, "Style", (Core.FORMAT_STYLES || []).map(function (s) { return [s.id, s.label]; }), "quote");
-      var partChk = checkGroup(form, "Include", (Core.FORMAT_PARTS || []).map(function (p) {
-        return { id: p.id, label: p.label, on: p.id !== "tags" };
-      }));
-      var colSel = selectRow(form, "Colour filter", [["", "All colours"]].concat((Core.COLOUR_CHOICES || []).map(function (c) { return [c, c + " only"]; })), "");
-      return function () {
-        var on = partChk();
-        return Core.buildFormatTemplate({
-          style: styleSel.value,
-          colour: colSel.value,
-          parts: { page: on.indexOf("page") !== -1, comment: on.indexOf("comment") !== -1, tags: on.indexOf("tags") !== -1 },
-        });
-      };
-    }
-
-    // ---- tiny form helpers --------------------------------------------------
-    // checkGroup → fn() returning the checked ids. Returns the group wrapper too
-    // (via .parentNode of the returned fn? no) — so we attach it on the fn.
-    function checkGroup(form, title, items) {
-      var group = el("div", "b-form-group");
-      group.append(el("div", "b-form-h", title));
-      var wrap = el("div", "b-checks");
-      var boxes = [];
-      items.forEach(function (it) {
-        var lab = el("label", "b-check");
-        var cb = doc.createElement("input"); cb.type = "checkbox"; cb.checked = !!it.on; cb.value = it.id;
-        lab.append(cb, el("span", null, it.label));
-        wrap.append(lab); boxes.push(cb);
-      });
-      group.append(wrap);
-      form.append(group);
-      var fn = function () { return boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; }); };
-      fn.groupEl = group; // so callers can show/hide the whole group (header + checks)
-      return fn;
-    }
-    function selectRow(form, title, pairs, def) {
-      var row = el("div", "b-form-row");
-      row.append(el("span", "b-form-rl", title));
-      var sel = el("select", "b-select");
-      pairs.forEach(function (p) { var o = el("option"); o.value = p[0]; o.textContent = p[1]; if (p[0] === def) o.selected = true; sel.append(o); });
-      row.append(sel); form.append(row);
-      return sel;
-    }
-
-    renderChooser();
+    renderPalette(true);
+    renderPreview();
+    try { view.focus(); } catch (e) {}
     return true;
   };
 })();

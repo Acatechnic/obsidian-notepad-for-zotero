@@ -1,27 +1,191 @@
 // Template-builder core (pure, Node + Vitest).
 //
-// Phase 1 backs a dedicated "Template Builder" window: a CM editor pre-filled
-// with a documented scaffold, a palette of clickable variable/snippet chips, and
-// a LIVE PREVIEW rendered against the selected item (or sample data). All the UI
-// does is edit a string and call previewTemplate(); this module is everything
-// that can be unit-tested without Zotero.
+// Backs the dedicated "Template Builder" window: a CodeMirror editor + a
+// CONTEXT-AWARE palette (it offers only what's valid where the cursor sits) + a
+// LIVE PREVIEW rendered against the selected item. No form, no generated output —
+// you compose freely; the palette inserts well-formed building blocks, including
+// one-click UPDATABLE field blocks (citation / abstract / title / authors) so
+// metadata can live in the body and stay in sync, not just annotations.
 //
-// The preview faithfully reuses the SAME engine the real write paths use:
-//   - a per-annotation body ("format" kind) → makeBlock (filters + renders each
-//     highlight + wraps in a %% zon %% block), exactly what Insert produces;
-//   - a whole-note template ("document" kind) → render() then syncBlocks(), the
-//     same pipeline as renderDocument in bootstrap.js.
-// So what the user sees in the preview is what they get in the note.
+// The preview reuses the SAME engine the write paths use, so what you see is what
+// Insert/Save produces.
 
-import { makeBlock, syncBlocks } from "./blocks.js";
+import { makeBlock, syncBlocks, parseConfig, configToString } from "./blocks.js";
 import { render } from "./render.js";
 import { parseTemplateFile, templateKind } from "./templates.js";
-import { DEFAULT_FORMATS } from "./formats.js";
+import { DEFAULT_FORMATS, FIELD_FORMATS } from "./formats.js";
 
-// ---------------------------------------------------------------- palettes
+// ----------------------------------------------- context-aware palette support
+//
+// Classify where the cursor sits so the palette shows only what's valid there:
+//   - "frontmatter" — inside the leading `--- … ---` YAML block
+//   - "block"       — inside a `%% zon … %% … %% /zon %%` block (with its kind:
+//                     "annotations" → highlight variables; "field" → item vars)
+//   - "body"        — anywhere else (prose); item variables + insertable blocks
+// Pure + unit-tested; the UI calls it on every cursor move.
+export function paletteContextAt(text, offset) {
+  const md = String(text == null ? "" : text);
+  const pos = Math.max(0, Math.min(offset == null ? 0 : offset, md.length));
 
-// Per-annotation (block) variables — valid inside a format body / annotations
-// block, where the context is one highlight.
+  // Frontmatter: a leading --- … --- block. Cursor anywhere within it (incl. the
+  // fences) counts as frontmatter.
+  const fm = md.match(/^---\r?\n[\s\S]*?\r?\n---/);
+  if (fm && pos <= fm[0].length) return { context: "frontmatter", blockKind: null };
+
+  // Walk the %% zon … %% / %% /zon %% blocks; if the cursor is within one, report
+  // it and the block's kind.
+  const openRe = /%%\s*zon\b([^%]*)%%/g;
+  let m;
+  while ((m = openRe.exec(md))) {
+    const openEnd = m.index + m[0].length;
+    const closeRe = /%%\s*\/zon\s*%%/g;
+    closeRe.lastIndex = openEnd;
+    const c = closeRe.exec(md);
+    const closeEnd = c ? c.index + c[0].length : md.length;
+    if (pos >= m.index && pos <= closeEnd) {
+      const cfg = parseConfig(m[1] || "");
+      return { context: "block", blockKind: cfg.kind || "annotations" };
+    }
+    openRe.lastIndex = closeEnd;
+  }
+  return { context: "body", blockKind: null };
+}
+
+// --------------------------------------------- annotation-block configurator
+//
+// The side-pane configurator builds/edits an annotations block from controls.
+// These catalogs drive its UI; the helpers below read the block under the cursor
+// (for two-way editing) and serialise a config back to a marker.
+export const BLOCK_COLOURS = ["yellow", "red", "green", "blue", "purple", "magenta", "orange", "grey"];
+export const BLOCK_TYPES = [["", "All types"], ["highlight", "Highlights"], ["underline", "Underlines"], ["image", "Images"], ["note", "Notes"]];
+export const BLOCK_STYLES = [["list", "List"], ["quote", "Blockquote"], ["callout", "Callout"]];
+export const BLOCK_PARTS = [["page", "Page link"], ["comment", "Comment"], ["tags", "Tags as #"]];
+export const NAMED_FORMATS = ["list", "quote", "callout", "compact"];
+
+// The enclosing `%% zon … %%` block at `offset`, with its parsed config and the
+// open-marker range [openStart, openEnd) to rewrite. null if not inside one.
+export function blockConfigAt(text, offset) {
+  const md = String(text == null ? "" : text);
+  const pos = Math.max(0, Math.min(offset == null ? 0 : offset, md.length));
+  const openRe = /%%\s*zon\b([^%]*)%%/g;
+  let m;
+  while ((m = openRe.exec(md))) {
+    const openStart = m.index, openEnd = m.index + m[0].length;
+    const closeRe = /%%\s*\/zon\s*%%/g;
+    closeRe.lastIndex = openEnd;
+    const c = closeRe.exec(md);
+    const closeEnd = c ? c.index + c[0].length : md.length;
+    if (pos >= openStart && pos <= closeEnd) return { config: parseConfig(m[1] || ""), openStart, openEnd };
+    openRe.lastIndex = closeEnd;
+  }
+  return null;
+}
+
+// Canonicalise configurator state into a block config (stable key order). State
+// values for colour/tag/parts are comma-joined strings (or "all"/"" for none).
+function normalizeAnnotationConfig(c) {
+  const o = c || {};
+  const out = { kind: "annotations" };
+  out.colour = o.colour && o.colour !== "all" ? o.colour : "all";
+  if (o.tag) out.tag = o.tag;
+  if (o.type && o.type !== "all") out.type = o.type;
+  if (o.style) { out.style = o.style; if (o.parts) out.parts = o.parts; }
+  else out.format = o.format || "quote";
+  out.sync = o.sync === "off" ? "off" : "on";
+  return out;
+}
+
+// The open marker `%% zon … %%` for a config (used to rewrite a block in place).
+export function annotationMarkerOpen(config) {
+  return "%% zon " + configToString(normalizeAnnotationConfig(config)) + " %%";
+}
+
+// A full, empty annotations block (marker pair) to insert at the cursor.
+export function annotationBlockText(config) {
+  return annotationMarkerOpen(config) + "\n%% /zon %%";
+}
+
+// ------------------------------------------------- frontmatter field builder
+//
+// The frontmatter panel ADDS a field (your key + a value source) and REMOVES a
+// detected one — targeted line surgery that never rewrites YAML it doesn't model
+// (a fully live two-way version is deferred). Pure helpers below.
+
+// Value sources offered when adding a frontmatter field.
+export const FRONTMATTER_VALUES = [
+  { id: "title", label: "Title", expr: '"{{title}}"' },
+  { id: "year", label: "Year", expr: "\"{{date | format('YYYY')}}\"" },
+  { id: "journal", label: "Journal", expr: '"{{publicationTitle}}"' },
+  { id: "itemType", label: "Item type", expr: '"{{itemType}}"' },
+  { id: "dateAdded", label: "Date added", expr: '"{{dateAdded}}"' },
+  { id: "abstract", label: "Abstract", expr: '"{{abstractNote}}"' },
+  { id: "citekey", label: "Citekey", expr: '"{{citekey}}"' },
+  { id: "desktopURI", label: "Zotero link", expr: '"{{desktopURI}}"' },
+  { id: "openPdf", label: "Open-PDF link", expr: '"{{openPdf}}"' },
+  { id: "tagsList", label: "Tags (list)", list: "{% for t in allTags.split(', ') %}\n  - \"{{t}}\"\n{% endfor %}" },
+  { id: "authorsList", label: "Authors (list)", list: '{% for c in creators %}\n  - "{{c.lastName}}, {{c.firstName}}"\n{% endfor %}' },
+  { id: "empty", label: "Empty (my own field)", empty: true },
+  { id: "custom", label: "Custom expression…", custom: true },
+];
+
+// Build the YAML line(s) for one field from a key + a chosen value source.
+export function frontmatterFieldText(key, value, customExpr) {
+  const k = String(key == null ? "" : key).trim() || "Field";
+  const v = value || {};
+  if (v.list) return k + ":\n" + v.list;
+  if (v.empty) return k + ":";
+  if (v.custom) return k + ": " + (customExpr || '""');
+  return k + ": " + (v.expr || '""');
+}
+
+// The leading `--- … ---` block, split into its parts. null if none.
+export function frontmatterRange(text) {
+  const md = String(text == null ? "" : text);
+  const m = md.match(/^(---\r?\n)([\s\S]*?)(\r?\n---)/);
+  if (!m) return null;
+  return { start: 0, end: m[0].length, fence1: m[1], inner: m[2], fence2: m[3] };
+}
+
+// Top-level field keys present in the frontmatter (for the remove list).
+export function frontmatterFieldKeys(text) {
+  const r = frontmatterRange(text);
+  if (!r) return [];
+  const keys = [];
+  r.inner.split("\n").forEach((line) => { const km = line.match(/^([A-Za-z0-9_-]+):/); if (km) keys.push(km[1]); });
+  return keys;
+}
+
+// Insert a field before the closing `---` (creating the frontmatter if absent).
+export function addFrontmatterField(text, fieldText) {
+  const md = String(text == null ? "" : text);
+  const field = String(fieldText).replace(/\s+$/, "");
+  const r = frontmatterRange(md);
+  if (!r) return "---\n" + field + "\n---\n\n" + md.replace(/^\n+/, "");
+  const inner = r.inner.replace(/\s+$/, "");
+  return r.fence1 + (inner ? inner + "\n" : "") + field + r.fence2 + md.slice(r.end);
+}
+
+// Remove a top-level field (its key line plus any continuation/loop lines, up to
+// the next top-level key). Leaves everything else verbatim.
+export function removeFrontmatterField(text, key) {
+  const md = String(text == null ? "" : text);
+  const r = frontmatterRange(md);
+  if (!r) return md;
+  const out = [];
+  let skipping = false;
+  for (const line of r.inner.split("\n")) {
+    const km = line.match(/^([A-Za-z0-9_-]+):/);
+    if (km) { skipping = km[1] === key; if (skipping) continue; }
+    else if (skipping) continue;
+    out.push(line);
+  }
+  const newInner = out.join("\n").replace(/^\n+/, "").replace(/\s+$/, "");
+  return r.fence1 + newInner + r.fence2 + md.slice(r.end);
+}
+
+// ---------------------------------------------------------------- palette data
+
+// Per-annotation (block) variables — valid inside an annotations block.
 export const BLOCK_VARIABLES = [
   { token: "{{text}}", label: "Highlighted text" },
   { token: "{{comment}}", label: "Your annotation comment" },
@@ -35,8 +199,8 @@ export const BLOCK_VARIABLES = [
   { token: "{{imageBaseName}}", label: "Filename of an image annotation" },
 ];
 
-// Whole-item variables — valid in a note template or a kind=field element, where
-// the context is the item (NOT a single highlight).
+// Whole-item variables — valid in the frontmatter or the body (and in field
+// blocks). NOT valid inside an annotations block (context is one highlight there).
 export const ITEM_VARIABLES = [
   { token: "{{citekey}}", label: "Citekey" },
   { token: "{{title}}", label: "Title" },
@@ -52,184 +216,55 @@ export const ITEM_VARIABLES = [
   { token: "{{allTags}}", label: "Item-level tags, comma-joined" },
 ];
 
-// Insertable multi-line snippets, grouped for the palette. `kind` is advisory for
-// the UI (which group/heading); the engine classifies the whole template itself.
-export const BUILDER_SNIPPETS = [
-  {
-    id: "annotations-block",
-    label: "Annotations block (all colours)",
-    kind: "block",
-    text: "%% zon kind=annotations colour=all sync=on format=list %%\n%% /zon %%",
-  },
-  {
-    id: "colour-route",
-    label: "Colour-routed section",
-    kind: "note",
-    text: '{{ highlights(colour="yellow", format="quote") }}',
-  },
-  {
-    id: "format-list",
-    label: "Format: list item",
-    kind: "format",
-    text: '- [p.{{page}}]({{link}}) "{{text}}"{% if comment %} — *{{comment}}*{% endif %}',
-  },
-  {
-    id: "format-quote",
-    label: "Format: blockquote",
-    kind: "format",
-    text: "> {{text}}\n> — [p.{{page}}]({{link}})",
-  },
-  {
-    id: "format-callout",
-    label: "Format: callout",
-    kind: "format",
-    text: "> [!quote] p.{{page}}\n> {{text}}{% if comment %}\n>\n> {{comment}}{% endif %}",
-  },
-  {
-    id: "tags-loop",
-    label: "Render the highlight's tags as #hashtags",
-    kind: "format",
-    text: "{% for t in tags %}#{{t}} {% endfor %}",
-  },
+// Frontmatter-field lines to insert — you rename the KEY to your own convention
+// (`Topics` instead of `Tags`, etc.); the value is a variable expression.
+export const FRONTMATTER_FIELDS = [
+  { label: "Title", text: 'Title: "{{title}}"' },
+  { label: "Year", text: "Year: \"{{date | format('YYYY')}}\"" },
+  { label: "Authors", text: 'Authors:\n{% for c in creators %}\n  - "{{c.lastName}}, {{c.firstName}}"\n{% endfor %}' },
+  { label: "Journal", text: 'Journal: "{{publicationTitle}}"' },
+  { label: "Item type", text: 'Type: "{{itemType}}"' },
+  { label: "Date added", text: 'Added: "{{dateAdded}}"' },
+  { label: "Tags", text: 'Tags:\n{% for t in allTags.split(\', \') %}\n  - "{{t}}"\n{% endfor %}' },
+  { label: "Citekey", text: 'citekey: "{{citekey}}"' },
+  { label: "Zotero link", text: 'ZoteroLink: "{{desktopURI}}"' },
 ];
 
-// The "all options" starter the editor opens with. A whole-note template that
-// demonstrates frontmatter, free-note prose, and a colour-routed annotations
-// block. `{# … #}` are Nunjucks comments — stripped at render, so they guide the
-// author without showing up in the note.
-export const BUILDER_SCAFFOLD = `---
+// UPDATABLE body fields — a `kind=field` block renders the named item-field format
+// once and refreshes on Update (like an annotation block). One per FIELD_FORMATS.
+export const FIELD_BLOCKS = [
+  { label: "Citation (updatable)", text: "%% zon kind=field sync=on format=citation %%\n%% /zon %%" },
+  { label: "Abstract (updatable)", text: "%% zon kind=field sync=on format=abstract %%\n%% /zon %%" },
+  { label: "Title (updatable)", text: "%% zon kind=field sync=on format=title %%\n%% /zon %%" },
+  { label: "Authors (updatable)", text: "%% zon kind=field sync=on format=authors %%\n%% /zon %%" },
+];
+
+// Annotation-block presets to drop into the body. The markers stay editable in
+// the editor, so colour/tag/type/format can be tweaked after inserting.
+export const ANNOTATION_BLOCKS = [
+  { label: "All highlights", text: "%% zon kind=annotations colour=all sync=on format=quote %%\n%% /zon %%" },
+  { label: "One colour (yellow)", text: "%% zon kind=annotations colour=yellow sync=on format=quote %%\n%% /zon %%" },
+  { label: "By tag (method)", text: "%% zon kind=annotations tag=method sync=on format=quote %%\n%% /zon %%" },
+  { label: "Colour-routed section", text: '{{ highlights(colour="yellow", format="quote") }}' },
+];
+
+// Clean starting points the editor can open with (or you can clear and compose).
+export const STARTER_NOTE = `---
 ZoteroLink: "{{desktopURI}}"
 citekey: "{{citekey}}"
 Title: "{{title}}"
-Year: "{{date | format('YYYY')}}"
-Journal: "{{publicationTitle}}"
-Tags:
-{% for t in allTags.split(', ') %}
-  - "{{t}}"
-{% endfor %}
 ---
 
-{# Whole-item variables (title, openPdf, …) work out here in the note body. #}
-[Open PDF in Zotero]({{openPdf}})
-
 ## Notes
-{# Your own prose — the plugin never overwrites text outside the blocks below. #}
 
 ## Highlights
-{# Each highlights(...) call becomes a live block filled with that colour. #}
-{{ highlights(colour="yellow", format="quote") }}
 
-{{ highlights(colour="blue", format="quote") }}
+%% zon kind=annotations colour=all sync=on format=quote %%
+%% /zon %%
 `;
 
-// ------------------------------------------------- guided "compose" generators
-//
-// These turn a few tick-box choices into a working template, so someone who
-// doesn't know Nunjucks can still produce one. The output is plain template text
-// the editor shows and previewTemplate renders — exactly what hand-authoring
-// would yield, just generated. Pure + unit-tested.
-
-// Frontmatter fields offered when composing a NOTE template. `fm` is the literal
-// YAML line(s); loop fields keep `{% for %}` / `{% endfor %}` and the value on
-// SEPARATE lines (and the generator always puts the closing `---` on its own
-// line) so templateKind sees the frontmatter — see the note.md gotcha.
-export const NOTE_FIELDS = [
-  { id: "title", label: "Title", fm: 'Title: "{{title}}"' },
-  { id: "year", label: "Year", fm: "Year: \"{{date | format('YYYY')}}\"" },
-  { id: "authors", label: "Authors", fm: 'Authors:\n{% for c in creators %}\n  - "{{c.lastName}}, {{c.firstName}}"\n{% endfor %}' },
-  { id: "journal", label: "Journal", fm: 'Journal: "{{publicationTitle}}"' },
-  { id: "itemType", label: "Item type", fm: 'Type: "{{itemType}}"' },
-  { id: "dateAdded", label: "Date added", fm: 'Added: "{{dateAdded}}"' },
-  { id: "tags", label: "Zotero tags", fm: 'Tags:\n{% for t in allTags.split(\', \') %}\n  - "{{t}}"\n{% endfor %}' },
-];
-
-// Body blocks offered for a NOTE template (each is optional).
-export const NOTE_BODY_OPTIONS = [
-  { id: "openPdf", label: "“Open PDF” link" },
-  { id: "citation", label: "Formatted citation" },
-  { id: "abstract", label: "Abstract" },
-  { id: "notes", label: "“Notes” heading (your prose)" },
-  { id: "highlights", label: "Highlights section", always: true },
-];
-
-export const FORMAT_STYLES = [
-  { id: "list", label: "List item" },
-  { id: "quote", label: "Blockquote" },
-  { id: "callout", label: "Callout" },
-];
-
-// Parts of each highlight that can be toggled in the format composer.
-export const FORMAT_PARTS = [
-  { id: "page", label: "Page link" },
-  { id: "comment", label: "Your comment" },
-  { id: "tags", label: "Highlight tags" },
-];
-
-export const COLOUR_CHOICES = ["yellow", "red", "green", "blue", "purple", "magenta", "orange", "grey"];
-
-// Generate a whole-note template from compose options.
-//   { fields:[ids], openPdf, citation, abstract, notes, highlights,
-//     byColour, colours:[names], highlightFormat }
-export function buildNoteTemplate(opts = {}) {
-  const o = opts || {};
-  const fields = o.fields || ["title", "year", "authors", "journal", "tags"];
-  const fmt = o.highlightFormat || "quote";
-  const out = [];
-  out.push("---");
-  out.push('ZoteroLink: "{{desktopURI}}"');
-  out.push('citekey: "{{citekey}}"');
-  for (const f of NOTE_FIELDS) if (fields.indexOf(f.id) !== -1) out.push(f.fm);
-  out.push("---");
-  out.push("");
-  if (o.openPdf) out.push("{% if openPdf %}[Open PDF in Zotero]({{openPdf}}){% endif %}\n");
-  if (o.citation) out.push("**Citation:** {{bibliography}}\n");
-  if (o.abstract) out.push("**Abstract:** {% if abstractNote %}{{abstractNote}}{% endif %}\n");
-  if (o.notes) { out.push("## Notes"); out.push(""); }
-  if (o.highlights !== false) {
-    out.push("## Highlights");
-    out.push("");
-    if (o.byColour && o.colours && o.colours.length) {
-      for (const c of o.colours) { out.push('{{ highlights(colour="' + c + '", format="' + fmt + '") }}'); out.push(""); }
-    } else {
-      out.push("%% zon kind=annotations colour=all sync=on format=" + fmt + " %%");
-      out.push("%% /zon %%");
-    }
-  }
-  return out.join("\n").replace(/\n{3,}/g, "\n\n").replace(/\s+$/, "") + "\n";
-}
-
-// Generate a per-highlight FORMAT body from compose options.
-//   { style:"list"|"quote"|"callout", parts:{page,comment,tags}, colour:"" }
-export function buildFormatTemplate(opts = {}) {
-  const o = opts || {};
-  const style = FORMAT_STYLES.some((s) => s.id === o.style) ? o.style : "quote";
-  const parts = o.parts || { page: true, comment: true, tags: false };
-  const tagBit = parts.tags ? " {% for t in tags %}#{{t}} {% endfor %}" : "";
-  const out = [];
-  if (o.colour) out.push("%%! colour=" + o.colour + " sync=on %%");
-  if (style === "list") {
-    let s = "- ";
-    if (parts.page) s += "[p.{{page}}]({{link}}) ";
-    s += '"{{text}}"';
-    if (parts.comment) s += "{% if comment %} — *{{comment}}*{% endif %}";
-    s += tagBit;
-    out.push(s);
-  } else if (style === "callout") {
-    out.push("> [!quote]" + (parts.page ? " p.{{page}}" : ""));
-    out.push("> {{text}}" + tagBit);
-    if (parts.comment) out.push("> {% if comment %}\n>\n> {{comment}}{% endif %}");
-  } else {
-    out.push("> {{text}}" + tagBit);
-    if (parts.page) out.push("> — [p.{{page}}]({{link}})");
-    if (parts.comment) out.push("{% if comment %}>\n> {{comment}}{% endif %}");
-  }
-  return out.join("\n");
-}
-
-// Clean per-type starting points (simpler than the full BUILDER_SCAFFOLD), used
-// when you pick a type but don't run the composer.
-export const STARTER_NOTE = buildNoteTemplate({ fields: ["title", "year", "authors", "journal", "tags"], notes: true, highlights: true, highlightFormat: "quote" });
-export const STARTER_FORMAT = buildFormatTemplate({ style: "quote", parts: { page: true, comment: true, tags: false } });
+export const STARTER_FORMAT = `> {{text}}
+> — [p.{{page}}]({{link}})`;
 
 // ---------------------------------------------------------------- preview
 
@@ -247,10 +282,9 @@ export function cleanPreview(markdown) {
 
 // Render `templateText` the way the real write path would, for the live preview.
 // ctx = { itemData, annotations, citekey, formats, attachmentFolder }. Returns
-// { kind, raw, preview } where `raw` is the faithful engine output (markers and
-// all, = what Insert/Create writes) and `preview` is the comment-stripped view.
-// Never throws — a template error becomes the preview text so the editor can show
-// it inline instead of blanking.
+// { kind, raw, preview } where `raw` is the faithful engine output (= what
+// Insert/Save writes) and `preview` is the comment-stripped view. Never throws —
+// a template error becomes the preview text so the editor can show it inline.
 export function previewTemplate(templateText, ctx = {}) {
   const text = String(templateText || "");
   // A template invoking the highlights() global is a whole-note template even
@@ -275,14 +309,14 @@ export function previewTemplate(templateText, ctx = {}) {
         ...(defaults.colour ? { colour: defaults.colour } : { colour: "all" }),
         ...(defaults.type ? { type: defaults.type } : {}),
       };
-      const formats = { ...DEFAULT_FORMATS, ...(ctx.formats || {}), __preview: { item, sep } };
+      const formats = { ...DEFAULT_FORMATS, ...FIELD_FORMATS, ...(ctx.formats || {}), __preview: { item, sep } };
       raw = makeBlock(config, anns, { citekey, formats, itemData, attachmentFolder });
     } else {
       // A whole-note template: render once over item data, then fill its blocks.
       const rendered = render(text, itemData);
       raw = syncBlocks(rendered, anns, {
         citekey,
-        formats: { ...DEFAULT_FORMATS, ...(ctx.formats || {}) },
+        formats: { ...DEFAULT_FORMATS, ...FIELD_FORMATS, ...(ctx.formats || {}) },
         itemData,
         attachmentFolder,
       });

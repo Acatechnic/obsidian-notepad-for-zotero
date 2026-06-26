@@ -1,11 +1,15 @@
 import { describe, it, expect } from "vitest";
 import {
-  previewTemplate, cleanPreview, BUILDER_SCAFFOLD, BUILDER_SNIPPETS,
-  BLOCK_VARIABLES, ITEM_VARIABLES, SAMPLE_ITEM, SAMPLE_ANNOTATIONS,
-  buildNoteTemplate, buildFormatTemplate, STARTER_NOTE, STARTER_FORMAT,
-  FORMAT_STYLES, NOTE_FIELDS,
+  previewTemplate, cleanPreview, paletteContextAt,
+  BLOCK_VARIABLES, ITEM_VARIABLES, FRONTMATTER_FIELDS, FIELD_BLOCKS, ANNOTATION_BLOCKS,
+  STARTER_NOTE, STARTER_FORMAT, SAMPLE_ITEM, SAMPLE_ANNOTATIONS,
+  blockConfigAt, annotationMarkerOpen, annotationBlockText,
+  FRONTMATTER_VALUES, frontmatterFieldText, frontmatterFieldKeys,
+  addFrontmatterField, removeFrontmatterField,
 } from "../src/builder.js";
 import { templateKind } from "../src/templates.js";
+import { composeFormat } from "../src/formats.js";
+import { renderBlockBody } from "../src/blocks.js";
 
 const ctx = { itemData: SAMPLE_ITEM, annotations: SAMPLE_ANNOTATIONS, citekey: SAMPLE_ITEM.citekey };
 
@@ -15,46 +19,30 @@ describe("previewTemplate — per-annotation (format) templates", () => {
     expect(out.kind).toBe("format");
     expect(out.error).toBeFalsy();
     expect(out.raw).toContain('"Coproduction reshapes the clinician–patient relationship." (p.3)');
-    expect(out.raw).toContain('(p.5)');
-    // makeBlock wraps it in a live zon block with per-annotation anchors.
-    expect(out.raw).toMatch(/%% zon kind=annotations/);
     expect(out.raw).toContain("%% ann:SAMP0001 %%");
   });
 
-  it("exposes the new per-annotation tags variable in the preview", () => {
+  it("exposes the per-annotation tags variable in the preview", () => {
     const out = previewTemplate("- {{text}}{% for t in tags %} #{{t}}{% endfor %}", ctx);
-    expect(out.raw).toContain("#finding #method"); // SAMP0001
-    expect(out.raw).toContain("#quote");            // SAMP0002
+    expect(out.raw).toContain("#finding #method");
+    expect(out.raw).toContain("#quote");
   });
 
   it("honours a directive (colour filter) in the body", () => {
     const out = previewTemplate('%%! colour=blue %%\n> {{text}}', ctx);
-    expect(out.raw).toContain("a clean, quotable sentence"); // the blue one
-    expect(out.raw).not.toContain("Coproduction reshapes");  // yellow excluded
+    expect(out.raw).toContain("a clean, quotable sentence");
+    expect(out.raw).not.toContain("Coproduction reshapes");
   });
 });
 
 describe("previewTemplate — whole-note (document) templates", () => {
-  it("renders frontmatter from item data and fills annotation blocks", () => {
-    const out = previewTemplate(BUILDER_SCAFFOLD, ctx);
+  it("renders the note starter against item data and fills its block", () => {
+    const out = previewTemplate(STARTER_NOTE, ctx);
     expect(out.kind).toBe("document");
     expect(out.error).toBeFalsy();
-    expect(out.raw).toContain('citekey: "doe2023example"');
     expect(out.raw).toContain('Title: "A Worked Example of Coproduction in Practice"');
-    expect(out.raw).toContain('Year: "2023"');                 // date | format('YYYY')
-    expect(out.raw).toContain("[Open PDF in Zotero](zotero://open-pdf/library/items/SAMPLEPDF)");
-    // highlights(colour="yellow") routed only the yellow highlights into its block
-    expect(out.raw).toContain("a second yellow point");
-  });
-
-  it("colour routing keeps blue out of the yellow block and vice-versa", () => {
-    const tpl = '## Y\n{{ highlights(colour="yellow", format="quote") }}\n\n## B\n{{ highlights(colour="blue", format="quote") }}';
-    const out = previewTemplate(tpl, ctx);
-    const yIdx = out.raw.indexOf("## Y");
-    const bIdx = out.raw.indexOf("## B");
-    const yellowBlock = out.raw.slice(yIdx, bIdx);
-    expect(yellowBlock).toContain("Coproduction reshapes");        // yellow
-    expect(yellowBlock).not.toContain("a clean, quotable sentence"); // blue not here
+    expect(out.raw).toContain("## Notes");
+    expect(out.raw).toContain("Coproduction reshapes"); // the all-colour block filled
   });
 });
 
@@ -64,7 +52,6 @@ describe("previewTemplate — robustness", () => {
     expect(out.error).toBe(true);
     expect(out.preview).toContain("Template error");
   });
-
   it("works with no annotations and no item (empty ctx)", () => {
     const out = previewTemplate('- "{{text}}"', {});
     expect(out.error).toBeFalsy();
@@ -82,122 +69,212 @@ describe("cleanPreview", () => {
   });
 });
 
-describe("palettes + scaffold are well-formed", () => {
-  it("the scaffold is classified as a whole-note (document) template", () => {
-    expect(templateKind(BUILDER_SCAFFOLD)).toBe("document");
+describe("paletteContextAt — where the cursor is, for the context-aware palette", () => {
+  const doc = [
+    "---",
+    'Topics: "{{allTags}}"',
+    "---",
+    "",
+    "Some body prose.",
+    "",
+    "%% zon kind=annotations colour=all sync=on format=list %%",
+    '- "x"',
+    "%% /zon %%",
+    "",
+    "%% zon kind=field sync=on format=abstract %%",
+    "> abs",
+    "%% /zon %%",
+    "Trailing prose.",
+  ].join("\n");
+  const at = (sub, after) => doc.indexOf(sub) + (after ? sub.length : 0);
+
+  it("reports frontmatter inside the leading --- … --- block", () => {
+    expect(paletteContextAt(doc, at("Topics")).context).toBe("frontmatter");
+  });
+  it("reports body for prose outside any block", () => {
+    expect(paletteContextAt(doc, at("Some body prose.")).context).toBe("body");
+    expect(paletteContextAt(doc, at("Trailing prose.")).context).toBe("body");
+  });
+  it("reports the block kind when inside a %% zon %% block", () => {
+    const inAnn = paletteContextAt(doc, at('- "x"'));
+    expect(inAnn.context).toBe("block");
+    expect(inAnn.blockKind).toBe("annotations");
+    const inField = paletteContextAt(doc, at("> abs"));
+    expect(inField.context).toBe("block");
+    expect(inField.blockKind).toBe("field");
+  });
+  it("treats a cursor on the open marker as inside the block", () => {
+    expect(paletteContextAt(doc, at("kind=annotations")).context).toBe("block");
+  });
+  it("defaults to body for an empty or offsetless doc", () => {
+    expect(paletteContextAt("", 0).context).toBe("body");
+    expect(paletteContextAt("hello").context).toBe("body");
+  });
+});
+
+describe("updatable field blocks render their item field", () => {
+  const preview = (label) => previewTemplate(FIELD_BLOCKS.find((b) => b.label.startsWith(label)).text, ctx);
+
+  it("Citation → the formatted bibliography", () => {
+    const out = preview("Citation");
+    expect(out.error).toBeFalsy();
+    expect(out.raw).toContain("Doe J and Smith A (2023)");
+  });
+  it("Abstract → the abstract text", () => {
+    expect(preview("Abstract").raw).toContain("A short sample abstract");
+  });
+  it("Title → the title", () => {
+    expect(preview("Title").raw).toContain("A Worked Example of Coproduction in Practice");
+  });
+  it("Authors → the author names", () => {
+    const out = preview("Authors").raw;
+    expect(out).toContain("[[Doe, Jane]]");
+    expect(out).toContain("[[Smith, Alex]]");
   });
 
-  it("every snippet text is a non-empty string with a stable id + label", () => {
-    const ids = new Set();
-    for (const s of BUILDER_SNIPPETS) {
-      expect(s.id, JSON.stringify(s)).toBeTruthy();
-      expect(ids.has(s.id)).toBe(false);
-      ids.add(s.id);
-      expect(s.label).toBeTruthy();
-      expect(typeof s.text).toBe("string");
-      expect(s.text.length).toBeGreaterThan(0);
+  it("a field block stays in sync (idempotent re-render)", () => {
+    const blk = FIELD_BLOCKS[0].text; // citation
+    const once = previewTemplate(blk, ctx).raw;
+    const note = `# N\n\n${once}\n`;
+    // re-running the document path over the same data is stable
+    expect(previewTemplate(note, ctx).error).toBeFalsy();
+  });
+});
+
+describe("annotation-block presets render without error", () => {
+  it("each preset previews cleanly", () => {
+    for (const b of ANNOTATION_BLOCKS) {
+      const out = previewTemplate(b.text, ctx);
+      expect(out.error, b.label + ": " + out.raw).toBeFalsy();
     }
   });
+  it("the tag preset filters to method-tagged highlights", () => {
+    const out = previewTemplate(ANNOTATION_BLOCKS.find((b) => b.label.startsWith("By tag")).text, ctx);
+    expect(out.raw).toContain("Coproduction reshapes");        // SAMP0001 has #method
+    expect(out.raw).not.toContain("a clean, quotable sentence"); // SAMP0002 is #quote
+  });
+});
 
-  it("variable tokens are {{…}} Nunjucks expressions", () => {
+describe("annotation-block configurator engine", () => {
+  it("composeFormat builds a body from style + parts (the 'advanced' mode)", () => {
+    // quote with only the page link
+    const f1 = composeFormat("quote", ["page"]);
+    const b1 = renderBlockBody({ colour: "all", style: "quote", parts: "page" }, SAMPLE_ANNOTATIONS, {});
+    expect(b1).toContain("> Coproduction reshapes");
+    expect(b1).toContain("[p.3]"); // page on
+    expect(b1).not.toContain("#finding"); // tags off
+    // list with page+comment+tags
+    const b2 = renderBlockBody({ colour: "all", style: "list", parts: "page,comment,tags" }, SAMPLE_ANNOTATIONS, {});
+    expect(b2).toContain("#finding #method");
+    expect(b2).toContain("— *core claim*");
+  });
+
+  it("a block renders via style+parts even with no named format available", () => {
+    const body = renderBlockBody({ colour: "all", style: "callout", parts: "comment" }, SAMPLE_ANNOTATIONS, {});
+    expect(body).toContain("> [!quote]");
+    expect(body).toContain("Coproduction reshapes");
+  });
+
+  it("the colour filter accepts a comma list (OR)", () => {
+    const body = renderBlockBody({ colour: "yellow,blue", format: "list" }, SAMPLE_ANNOTATIONS, {});
+    expect(body).toContain("Coproduction reshapes");      // yellow
+    expect(body).toContain("a clean, quotable sentence");  // blue
+  });
+
+  it("annotationMarkerOpen / annotationBlockText serialise a config", () => {
+    const open = annotationMarkerOpen({ colour: "yellow,blue", tag: "method", style: "quote", parts: "page,comment", sync: "on" });
+    expect(open).toBe("%% zon kind=annotations colour=yellow,blue tag=method style=quote parts=page,comment sync=on %%");
+    expect(annotationBlockText({ format: "list" })).toBe("%% zon kind=annotations colour=all format=list sync=on %%\n%% /zon %%");
+  });
+
+  it("blockConfigAt reads the block under the cursor + its open-marker range", () => {
+    const doc = "intro\n\n%% zon kind=annotations colour=yellow tag=method sync=on format=quote %%\n%% /zon %%\nafter";
+    const inside = doc.indexOf("tag=method");
+    const r = blockConfigAt(doc, inside);
+    expect(r).not.toBeNull();
+    expect(r.config.colour).toBe("yellow");
+    expect(r.config.tag).toBe("method");
+    // the open-marker range round-trips: replacing it rebuilds a valid marker
+    expect(doc.slice(r.openStart, r.openEnd)).toMatch(/^%% zon .* %%$/);
+    expect(blockConfigAt(doc, doc.indexOf("intro"))).toBeNull(); // outside any block
+  });
+
+  it("round-trip: edit a block's config in place via blockConfigAt + annotationMarkerOpen", () => {
+    let doc = "%% zon kind=annotations colour=all sync=on format=quote %%\n%% /zon %%";
+    const r = blockConfigAt(doc, 5);
+    const next = annotationMarkerOpen({ ...r.config, colour: "red", tag: "finding" });
+    doc = doc.slice(0, r.openStart) + next + doc.slice(r.openEnd);
+    expect(doc).toContain("colour=red");
+    expect(doc).toContain("tag=finding");
+    expect(blockConfigAt(doc, 5).config.colour).toBe("red"); // still parseable
+  });
+});
+
+describe("frontmatter field builder (add / remove)", () => {
+  const val = (id) => FRONTMATTER_VALUES.find((v) => v.id === id);
+  const base = "---\ncitekey: \"x\"\n---\n\n## Notes\n";
+
+  it("frontmatterFieldText builds scalar, list, empty and custom lines", () => {
+    expect(frontmatterFieldText("Year", val("year"))).toBe("Year: \"{{date | format('YYYY')}}\"");
+    expect(frontmatterFieldText("Topics", val("tagsList"))).toBe("Topics:\n{% for t in allTags.split(', ') %}\n  - \"{{t}}\"\n{% endfor %}");
+    expect(frontmatterFieldText("KeyIdea", val("empty"))).toBe("KeyIdea:");
+    expect(frontmatterFieldText("X", val("custom"), '"{{itemType}}"')).toBe('X: "{{itemType}}"');
+  });
+
+  it("adds a field before the closing --- and keeps the body", () => {
+    const out = addFrontmatterField(base, frontmatterFieldText("Title", val("title")));
+    expect(out).toContain('citekey: "x"');
+    expect(out).toContain('Title: "{{title}}"');
+    expect(out).toMatch(/Title: "\{\{title\}\}"\n---/); // before the closing fence
+    expect(out).toContain("## Notes"); // body untouched
+  });
+
+  it("uses your own key name (Topics, not Tags)", () => {
+    const out = addFrontmatterField(base, frontmatterFieldText("Topics", val("tagsList")));
+    expect(out).toContain("Topics:");
+    expect(out).toContain("{% for t in allTags.split(', ') %}");
+    expect(out).not.toContain("Tags:");
+  });
+
+  it("creates the frontmatter block if the note has none", () => {
+    const out = addFrontmatterField("just body text\n", frontmatterFieldText("Title", val("title")));
+    expect(out.startsWith('---\nTitle: "{{title}}"\n---\n')).toBe(true);
+    expect(out).toContain("just body text");
+  });
+
+  it("lists the field keys and removes one (incl. its loop lines)", () => {
+    let md = addFrontmatterField(base, frontmatterFieldText("Topics", val("tagsList")));
+    md = addFrontmatterField(md, frontmatterFieldText("Title", val("title")));
+    expect(frontmatterFieldKeys(md)).toEqual(["citekey", "Topics", "Title"]);
+    const removed = removeFrontmatterField(md, "Topics");
+    expect(removed).not.toContain("Topics:");
+    expect(removed).not.toContain("{% for t in allTags"); // the loop went too
+    expect(removed).toContain('Title: "{{title}}"');       // siblings kept
+    expect(removed).toContain('citekey: "x"');
+    expect(frontmatterFieldKeys(removed)).toEqual(["citekey", "Title"]);
+  });
+
+  it("add then remove round-trips back to the original keys", () => {
+    const added = addFrontmatterField(base, frontmatterFieldText("Year", val("year")));
+    expect(frontmatterFieldKeys(removeFrontmatterField(added, "Year"))).toEqual(["citekey"]);
+  });
+});
+
+describe("palette catalogs + starters are well-formed", () => {
+  it("variable tokens are {{…}} expressions with labels", () => {
     for (const v of [...BLOCK_VARIABLES, ...ITEM_VARIABLES]) {
       expect(v.token, v.label).toMatch(/^\{\{.*\}\}$/);
       expect(v.label).toBeTruthy();
     }
   });
-
-  it("every block snippet renders without error through the preview", () => {
-    for (const s of BUILDER_SNIPPETS) {
-      const out = previewTemplate(s.text, ctx);
-      expect(out.error, `${s.id}: ${out.raw}`).toBeFalsy();
-    }
+  it("frontmatter-field inserts are non-empty labelled lines", () => {
+    for (const f of FRONTMATTER_FIELDS) { expect(f.label).toBeTruthy(); expect(f.text.length).toBeGreaterThan(0); }
+    expect(FRONTMATTER_FIELDS.find((f) => f.label === "Title").text).toContain("{{title}}");
   });
-
-  it("the documented format snippets actually emit the highlight text", () => {
-    for (const id of ["format-list", "format-quote", "format-callout"]) {
-      const s = BUILDER_SNIPPETS.find((x) => x.id === id);
-      const out = previewTemplate(s.text, ctx);
-      expect(out.raw, id).toContain("Coproduction reshapes");
-    }
-  });
-});
-
-describe("buildNoteTemplate (compose → whole-note template)", () => {
-  it("is a valid whole-note template that renders against item data", () => {
-    const tpl = buildNoteTemplate({ fields: ["title", "year", "authors", "tags"], notes: true, highlights: true, highlightFormat: "quote" });
-    expect(templateKind(tpl)).toBe("document"); // frontmatter detected (closing --- on its own line)
-    const out = previewTemplate(tpl, ctx);
-    expect(out.error).toBeFalsy();
-    expect(out.raw).toContain('Title: "A Worked Example of Coproduction in Practice"');
-    expect(out.raw).toContain('Year: "2023"');
-    expect(out.raw).toContain('"Doe, Jane"');        // authors loop
-    expect(out.raw).toContain("## Notes");
-    expect(out.raw).toContain("## Highlights");
-    expect(out.raw).toContain("Coproduction reshapes"); // single all-colour block filled
-  });
-
-  it("only includes the frontmatter fields you ticked", () => {
-    const tpl = buildNoteTemplate({ fields: ["title"], highlights: true });
-    expect(tpl).toContain('Title: "{{title}}"');
-    expect(tpl).not.toContain("Journal:");
-    expect(tpl).not.toContain("Authors:");
-  });
-
-  it("routes by colour when asked, with one block per chosen colour", () => {
-    const tpl = buildNoteTemplate({ fields: ["title"], highlights: true, byColour: true, colours: ["yellow", "blue"], highlightFormat: "quote" });
-    expect(tpl).toContain('highlights(colour="yellow"');
-    expect(tpl).toContain('highlights(colour="blue"');
-    const out = previewTemplate(tpl, ctx);
-    expect(out.error).toBeFalsy();
-    expect(out.raw).toContain("Coproduction reshapes");        // yellow
-    expect(out.raw).toContain("a clean, quotable sentence");   // blue
-  });
-
-  it("adds the openPdf / citation / abstract body blocks when ticked", () => {
-    const tpl = buildNoteTemplate({ fields: ["title"], openPdf: true, citation: true, abstract: true, highlights: false });
-    const out = previewTemplate(tpl, ctx);
-    expect(out.raw).toContain("[Open PDF in Zotero](zotero://open-pdf/library/items/SAMPLEPDF)");
-    expect(out.raw).toContain("Doe J and Smith A (2023)"); // bibliography
-    expect(out.raw).toContain("A short sample abstract");
-  });
-});
-
-describe("buildFormatTemplate (compose → per-highlight body)", () => {
-  it("each style renders the highlight text without error", () => {
-    for (const s of FORMAT_STYLES) {
-      const tpl = buildFormatTemplate({ style: s.id, parts: { page: true, comment: true, tags: true } });
-      const out = previewTemplate(tpl, ctx);
-      expect(out.error, s.id + ": " + out.raw).toBeFalsy();
-      expect(out.raw, s.id).toContain("Coproduction reshapes");
-      expect(out.raw, s.id).toContain("#finding"); // tags part on
-    }
-  });
-
-  it("drops the page link and comment when those parts are off", () => {
-    const tpl = buildFormatTemplate({ style: "list", parts: { page: false, comment: false, tags: false } });
-    expect(tpl).not.toContain("{{link}}");
-    expect(tpl).not.toContain("{{comment}}");
-    expect(tpl).toContain('"{{text}}"');
-  });
-
-  it("pins a colour via a directive when chosen", () => {
-    const tpl = buildFormatTemplate({ style: "quote", colour: "blue", parts: { page: true } });
-    expect(tpl).toMatch(/^%%! colour=blue/);
-    const out = previewTemplate(tpl, ctx);
-    expect(out.raw).toContain("a clean, quotable sentence"); // blue highlight only
-    expect(out.raw).not.toContain("Coproduction reshapes");  // yellow excluded
-  });
-});
-
-describe("starters are valid and classify correctly", () => {
-  it("STARTER_NOTE is a document template that renders", () => {
+  it("STARTER_NOTE is a document template that renders; STARTER_FORMAT is a per-highlight body", () => {
     expect(templateKind(STARTER_NOTE)).toBe("document");
     expect(previewTemplate(STARTER_NOTE, ctx).error).toBeFalsy();
-  });
-  it("STARTER_FORMAT is a per-highlight body that renders", () => {
     expect(templateKind(STARTER_FORMAT)).toBe("format");
-    const out = previewTemplate(STARTER_FORMAT, ctx);
-    expect(out.error).toBeFalsy();
-    expect(out.raw).toContain("Coproduction reshapes");
+    expect(previewTemplate(STARTER_FORMAT, ctx).raw).toContain("Coproduction reshapes");
   });
 });

@@ -16,8 +16,15 @@
 // anywhere, any number, each with its own filter / format / sync flag.
 
 import { makeEnv } from "./render.js";
-import { DEFAULT_FORMATS, DEFAULT_FORMAT_NAME } from "./formats.js";
+import { DEFAULT_FORMATS, DEFAULT_FORMAT_NAME, composeFormat } from "./formats.js";
 import { pdfLink } from "./annotations.js";
+
+// Resolve the format a block renders with: a composed `style`+`parts` format (the
+// configurator's advanced mode) takes precedence over a named `format=…`.
+function resolveFormat(config, formats) {
+  if (config.style) return composeFormat(config.style, config.parts);
+  return formats[config.format] || formats[DEFAULT_FORMAT_NAME];
+}
 
 const OPEN_RE = /^\s*%%\s*zon\s+([^%]*?)\s*%%\s*$/;
 const CLOSE_RE = /^\s*%%\s*\/zon\s*%%\s*$/;
@@ -98,8 +105,12 @@ function matchesFilter(a, cfg) {
   // strokes (no text, no page content), so they'd render as empty `""` items.
   // Exclude them unless a block explicitly asks for `type=ink`.
   if (a.type === "ink" && (!wantType || wantType === "all")) return false;
+  // Colour filter: a single colour or a comma list (OR), e.g. `colour=yellow,blue`.
   const wantColour = cfg.colour || cfg.color;
-  if (wantColour && wantColour !== "all" && (a.colourName || "") !== wantColour) return false;
+  if (wantColour && wantColour !== "all") {
+    const want = String(wantColour).split(",").map((s) => s.trim()).filter(Boolean);
+    if (want.length && want.indexOf(a.colourName || "") === -1) return false;
+  }
   if (wantType && wantType !== "all" && a.type !== wantType) return false;
   // Tag filter (OR-semantics): keep highlights carrying ANY of the named tags.
   // `tag=method` or `tag=method,finding` (comma-separated). `tags=` is accepted
@@ -121,7 +132,7 @@ function matchesFilter(a, cfg) {
 function renderAnnotationItems(config, annotations, opts = {}) {
   const formats = opts.formats || DEFAULT_FORMATS;
   const env = opts.env || makeEnv();
-  const fmt = formats[config.format] || formats[DEFAULT_FORMAT_NAME];
+  const fmt = resolveFormat(config, formats);
   const anns = (annotations || [])
     .filter((a) => matchesFilter(a, config))
     .sort((x, y) => {
@@ -153,7 +164,7 @@ export function renderBlockBody(config, annotations, opts = {}) {
     return env.renderString(tpl, data).replace(/\s+$/, "");
   }
 
-  const fmt = formats[config.format] || formats[DEFAULT_FORMAT_NAME];
+  const fmt = resolveFormat(config, formats);
   const items = renderAnnotationItems(config, annotations, { ...opts, env, formats });
   return items.map((i) => i.text).join(fmt.sep || "\n");
 }
