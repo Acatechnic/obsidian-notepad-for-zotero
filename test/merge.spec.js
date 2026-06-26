@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { render } from "../src/render.js";
-import { mergeNote } from "../src/merge.js";
+import { mergeNote, refreshFrontmatter } from "../src/merge.js";
+import { syncBlocks } from "../src/blocks.js";
 import { item, itemAfterNewAnnotation } from "./fixtures/data.js";
 
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
@@ -10,6 +11,58 @@ const TEMPLATE = read("./fixtures/note.njk");
 
 const renderItem = (data) => render(TEMPLATE, data);
 const countAnchors = (md) => (md.match(/%% ann:[A-Za-z0-9]+ %%/g) || []).length;
+
+describe("refreshFrontmatter — the Update model: body is the user's, blocks anywhere", () => {
+  // A genuinely free-form note: NO ## headings, the user's prose interleaved with
+  // a %% zon %% block placed wherever they like. This is the plugin's core promise.
+  const freestyle = [
+    "---",
+    'citekey: "x"',
+    'Title: "OLD TITLE"',
+    "KeyIdea: my own thesis",   // user-owned, plainly filled
+    "---",
+    "",
+    "Some opening thoughts I wrote myself — keep these.",
+    "",
+    "%% zon kind=annotations colour=all sync=on format=list %%",
+    "%% /zon %%",
+    "",
+    "A closing reflection, no heading in sight.",
+    "",
+  ].join("\n");
+
+  // Fresh render of the scaffold (Title is a Zotero-owned, expression-filled key).
+  const scaffoldRender = "---\ncitekey: \"x\"\nTitle: \"NEW TITLE\"\nKeyIdea: \n---\n\n(template body that must NOT appear)\n";
+
+  it("refreshes Zotero-owned frontmatter keys but leaves the entire body byte-for-byte", () => {
+    const out = refreshFrontmatter(freestyle, scaffoldRender, ["KeyIdea"]);
+    expect(out).toContain('Title: "NEW TITLE"');            // Zotero key refreshed
+    expect(out).toContain("KeyIdea: my own thesis");        // user-owned key preserved
+    expect(out).toContain("Some opening thoughts I wrote myself — keep these."); // prose above any heading kept
+    expect(out).toContain("A closing reflection, no heading in sight.");
+    expect(out).not.toContain("template body that must NOT appear"); // body never templated
+    // the body after the frontmatter is identical to the original's body
+    const bodyOf = (s) => s.slice(s.indexOf("---", 3));
+    expect(out.split("---\n\n")[1]).toBe(freestyle.split("---\n\n")[1]);
+  });
+
+  it("leaves a note with NO frontmatter completely unchanged", () => {
+    const noFm = "Just my notes.\n\n%% zon kind=annotations colour=all sync=on format=list %%\n%% /zon %%\n";
+    expect(refreshFrontmatter(noFm, scaffoldRender, [])).toBe(noFm);
+  });
+
+  it("full Update flow: refresh frontmatter, then syncBlocks fills the block — prose untouched, no headings needed", () => {
+    const anns = [{ key: "A", type: "highlight", attachmentKey: "PDF", pageLabel: "3", pageIndex: 2, sortIndex: "1", annotatedText: "a synced point", colourName: "yellow" }];
+    let merged = refreshFrontmatter(freestyle, scaffoldRender, ["KeyIdea"]);
+    merged = syncBlocks(merged, anns, {});
+    expect(merged).toContain('Title: "NEW TITLE"');
+    expect(merged).toContain("Some opening thoughts I wrote myself — keep these.");
+    expect(merged).toContain("A closing reflection, no heading in sight.");
+    expect(merged).toContain("a synced point");            // the block filled in place
+    // idempotent
+    expect(syncBlocks(refreshFrontmatter(merged, scaffoldRender, ["KeyIdea"]), anns, {})).toBe(merged);
+  });
+});
 
 describe("idempotent merge", () => {
   it("creates the note on first run (no existing file)", () => {

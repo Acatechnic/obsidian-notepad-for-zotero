@@ -101,6 +101,15 @@ function matchesFilter(a, cfg) {
   const wantColour = cfg.colour || cfg.color;
   if (wantColour && wantColour !== "all" && (a.colourName || "") !== wantColour) return false;
   if (wantType && wantType !== "all" && a.type !== wantType) return false;
+  // Tag filter (OR-semantics): keep highlights carrying ANY of the named tags.
+  // `tag=method` or `tag=method,finding` (comma-separated). `tags=` is accepted
+  // as an alias. The annotation's own tags come from a.tags (see annotations.js).
+  const wantTags = cfg.tag || cfg.tags;
+  if (wantTags && wantTags !== "all") {
+    const want = String(wantTags).split(",").map((s) => s.trim()).filter(Boolean);
+    const have = a.tags || [];
+    if (want.length && !want.some((t) => have.indexOf(t) !== -1)) return false;
+  }
   return true;
 }
 

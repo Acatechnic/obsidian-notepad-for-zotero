@@ -173,6 +173,7 @@ them. The open marker carries the block's settings as `key=value` attributes:
 | `kind` | `annotations` (default), `field`, `section`, `custom` | `annotations` renders the body once **per highlight**; the others render **once over the item's data** (abstract, citation, a metadata field) — see the directive section above. |
 | `colour` | `all`, `yellow`, `red`, `green`, `blue`, `purple`, `magenta`, `orange`, `grey` | Only pull highlights of this colour (`annotations` blocks only). |
 | `type` | `all`, `highlight`, `underline`, `image`, `ink`, `note` | Only pull annotations of this type. Omitted = all types. |
+| `tag` | a tag name, or a comma list (`tag=method` / `tag=method,finding`) | Only pull highlights carrying one of these **annotation tags** (the tags you add to a highlight in the Zotero reader). Comma list = OR. Combines with `colour`/`type` (AND across filters). Omitted = any. `tags=` is an alias. |
 | `sync` | `on` (default), `off` | `on` = the block **mirrors Zotero** and is regenerated on every Update. `off` = a **frozen** one-time snapshot Update never touches — use it to hand-curate. |
 | `format` | a template name (`list`, `quote`, `callout`, `compact`, or your own file) | Which per-annotation template rendered the body, so Update can re-render it the same way. |
 
@@ -195,6 +196,26 @@ add *after* it can be kept (see below).
   hand-edited it and want it frozen against further Updates.
 - Everything **outside** `%% zon %%` blocks — your own writing, headings, links —
   is never touched.
+
+### What's yours vs. what refreshes
+
+The note body is **yours**. It's free-form markdown: write whatever you like,
+with whatever headings you like — or none. Put `%% zon %%` blocks **anywhere**
+you want; you can have a freestyle note with several annotation blocks and
+nothing else. **Update only ever changes two things:**
+
+1. **The YAML frontmatter** — Zotero-owned keys (those filled by a `{{ }}`
+   expression in your template) are refreshed; keys you fill in plainly are
+   treated as yours and preserved, as are any keys you add. A note with no
+   frontmatter is left without one.
+2. **The inside of `sync=on` `%% zon %%` blocks** — regenerated from Zotero's
+   current annotations, wherever the block sits.
+
+**Everything else in the body is left byte-for-byte** — prose above, below, or
+between blocks; your headings; links; text with no heading at all. There is no
+required `## Notes` or `## Annotations` structure. If you want a value to keep
+refreshing from Zotero, drive it from a `{{ }}` expression (in the frontmatter or
+a `%% zon kind=field %%` block); anything you type as plain text stays put.
 
 ### Where to put your own notes
 

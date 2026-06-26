@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Filter an annotations block by tag.** A block can now pull only the highlights
+  carrying a given annotation tag: `%% zon kind=annotations tag=method … %%`
+  (comma list = OR, e.g. `tag=method,finding`). Combines with `colour`/`type`.
+
+### Changed
+- **Update no longer imposes the template's heading structure on your note.** A
+  note is free-form: your prose and `%% zon %%` blocks can go **anywhere**, with
+  or without headings — you might have a freestyle note with several annotation
+  blocks and nothing else. Update now refreshes **only** the YAML frontmatter
+  (Zotero-owned keys) and syncs the `%% zon %%` blocks; the rest of the body is
+  left byte-for-byte. Previously the non-manifest Update path re-merged the note
+  against the template by heading, which could overwrite anything that didn't fit
+  the template's `## Notes` / `## Annotations` shape (e.g. notes above the first
+  heading). Frontmatter that should keep refreshing belongs in a `{{ }}`
+  expression; plainly-filled keys are preserved as yours.
+
+### Fixed
+- **Settings → “Default note template” now lists your Templates-folder files
+  first time.** The dropdown could come up with only the built-in options until
+  you restarted Zotero; it now loads your folder's templates reliably when the
+  pane opens.
+
 ## [1.0.0-beta.14] — 2026-06-25
 
 ### Added

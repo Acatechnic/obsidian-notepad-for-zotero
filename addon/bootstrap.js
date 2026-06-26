@@ -652,6 +652,21 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     return names;
   },
 
+  // Window-INDEPENDENT template-name list for the Settings "Default note template"
+  // dropdown. The prefs-pane script scope can't reliably enumerate the folder
+  // (IOUtils/PathUtils aren't dependable globals there — same class of issue as
+  // Services), so it asks the plugin instead: this reads `_templates` (already
+  // loaded in the privileged main-window scope) plus the static built-in formats.
+  prefsTemplateNames() {
+    let names = new Set(["note", "list", "quote", "callout", "compact"]);
+    for (let k of Object.keys(this._templates || {})) {
+      if (!/^(templates|readme)$/i.test(k)) names.add(k);
+    }
+    let def = this.defaultNoteTemplate();
+    if (def) names.add(def);
+    return [...names].sort();
+  },
+
   // Store defaults for any unset pref so the preferences pane shows real values
   // (its inputs bind to the stored pref, which is blank/"undefined" otherwise).
   seedDefaults() {
@@ -1374,8 +1389,11 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     let row1 = h("div", "zon-row"); row1.append(templateSel, colourSel, syncSel, insertBtn);
     // "⋯ More" (Sync Metadata / Migrate / Push tags) is appended only when
     // experimental features are enabled in Settings — keeps the row uncluttered.
-    let row2 = h("div", "zon-row zon-row-actions"); row2.append(refreshBtn, openBtn, reloadBtn, builderBtn);
-    if (this.experimentalEnabled()) row2.append(moreWrap);
+    let row2 = h("div", "zon-row zon-row-actions"); row2.append(refreshBtn, openBtn, reloadBtn);
+    // The Template Builder is still in development — gate it behind the
+    // experimental-features toggle (Settings) so it's hidden for normal users but
+    // stays reachable for ongoing testing. Move it out of this `if` to ship it.
+    if (this.experimentalEnabled()) row2.append(builderBtn, moreWrap);
     builderBtn.addEventListener("click", () => { try { this.openTemplateBuilder(win, rec); } catch (e) { this.log("openTemplateBuilder failed: " + e); } });
     let row4 = h("div", "zon-row zon-row-view"); row4.append(readLabel, frontLabel, markersLabel);
     toolbar.append(row1, row2, row4, status);
@@ -2611,12 +2629,12 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
       let scaffold = await this.resolveNoteScaffoldText();
       if (scaffold) {
         try {
+          // Refresh ONLY the frontmatter (Zotero-owned keys) from the scaffold;
+          // the whole body is the user's — free prose, any/no headings, and
+          // `%% zon %%` blocks anywhere — and is left byte-for-byte untouched.
+          // Only syncBlocks (below) ever rewrites the body, and only inside blocks.
           let fresh = win.ZONCore.render(scaffold, data);
-          merged = win.ZONCore.mergeNote(existing, fresh, {
-            userOwnedKeys: this.templateUserOwnedKeys(scaffold),
-            proseSections: ["notes", "annotations"], // the zon engine owns annotations
-            annotationSections: [],
-          });
+          merged = win.ZONCore.refreshFrontmatter(existing, fresh, this.templateUserOwnedKeys(scaffold));
         } catch (e) { this.log("metadata refresh failed: " + e); merged = existing; }
       }
     }
@@ -2719,6 +2737,13 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     let item = (rec && rec.item) || (this.selectedRegularItems(win)[0] || null);
     let ctx = await this.gatherPreviewContext(win, item);
     let dark = this.isDarkTheme(win, rec && rec.host);
+    // Name → raw text map of existing templates, for the builder's "Edit existing".
+    let templates = {};
+    try {
+      await this.loadTemplates();
+      let all = this.allTemplates(win) || {};
+      for (let name in all) { if (all[name] && typeof all[name].text === "string") templates[name] = all[name].text; }
+    } catch (e) { this.log("builder: template list failed: " + e); }
 
     let NS = "http://www.w3.org/1999/xhtml";
     let overlay = win.document.createElementNS(NS, "div");
@@ -2757,7 +2782,7 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     let waitForApp = function () {
       let fw = iframe.contentWindow;
       if (fw && fw.startBuilder && fw.ZONCore && fw.ZOSEditorLib) {
-        try { fw.startBuilder({ previewCtx: ctx, bridge, dark }); }
+        try { fw.startBuilder({ previewCtx: ctx, bridge, dark, templates }); }
         catch (e) { self.log("startBuilder failed: " + e); }
         return;
       }
@@ -2805,11 +2830,28 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
       + ".b-title{font-weight:600;font-size:14px;}.b-sub{color:" + muted + ";font-size:12px;flex:1;}"
       + ".b-x{margin-left:auto;border:0;background:transparent;color:" + muted + ";font-size:15px;cursor:pointer;}"
       + ".b-body{flex:1;display:flex;min-height:0;}"
-      + ".b-palette{width:200px;border-right:1px solid " + border + ";overflow:auto;padding:8px;background:" + pane + ";}"
-      + ".b-pal-head{font-weight:600;color:" + muted + ";font-size:11px;text-transform:uppercase;margin:10px 2px 4px;}"
+      + ".b-side{width:300px;border-right:1px solid " + border + ";overflow:auto;padding:8px 10px;background:" + pane + ";}"
+      + ".b-pal-head{font-weight:600;color:" + muted + ";font-size:11px;text-transform:uppercase;margin:12px 2px 5px;}"
       + ".b-pal-group{display:flex;flex-wrap:wrap;gap:4px;}"
       + ".b-chip{border:1px solid " + border + ";background:" + bg + ";color:" + fg + ";border-radius:5px;padding:3px 7px;font-size:11px;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}"
-      + ".b-chip:hover{border-color:" + accent + ";color:" + accent + ";}"
+      + ".b-chip:hover{border-color:" + accent + ";color:" + accent + ";}.b-chip-l{pointer-events:none;}"
+      // guided chooser + compose form
+      + ".b-chooser{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;}"
+      + ".b-chooser-q{font-size:18px;font-weight:600;margin-bottom:20px;}"
+      + ".b-cards{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;max-width:760px;}"
+      + ".b-card{width:220px;border:1px solid " + border + ";border-radius:10px;padding:16px;cursor:pointer;background:" + pane + ";transition:border-color .1s;}"
+      + ".b-card:hover{border-color:" + accent + ";}.b-card-off{opacity:.45;cursor:default;}.b-card-off:hover{border-color:" + border + ";}"
+      + ".b-card-t{font-weight:600;font-size:14px;margin-bottom:6px;}.b-card-d{color:" + muted + ";font-size:12px;line-height:1.45;}"
+      + ".b-back{border:0;background:transparent;color:" + accent + ";cursor:pointer;font-size:12px;padding:0 6px 0 0;}"
+      + ".b-form{display:flex;flex-direction:column;gap:6px;margin:2px 0 8px;}"
+      + ".b-form-h{font-weight:600;font-size:11px;color:" + muted + ";margin:8px 0 2px;}"
+      + ".b-checks{display:flex;flex-wrap:wrap;gap:2px 12px;}"
+      + ".b-check{display:flex;align-items:center;gap:5px;font-size:12px;width:46%;cursor:pointer;}"
+      + ".b-form-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:3px 0;}"
+      + ".b-form-rl{font-size:12px;color:" + fg + ";}"
+      + ".b-select{border:1px solid " + border + ";border-radius:5px;padding:3px 6px;background:" + bg + ";color:" + fg + ";font-size:12px;max-width:170px;}"
+      + ".b-gen{width:100%;margin:6px 0 2px;}"
+      + ".b-hint{color:" + muted + ";font-size:11px;line-height:1.4;margin:4px 2px 8px;}"
       + ".b-editor,.b-preview{flex:1;display:flex;flex-direction:column;min-width:0;}"
       + ".b-editor{border-right:1px solid " + border + ";}"
       + ".b-colhead{font-weight:600;color:" + muted + ";font-size:11px;text-transform:uppercase;padding:8px 12px;display:flex;align-items:center;gap:8px;}"

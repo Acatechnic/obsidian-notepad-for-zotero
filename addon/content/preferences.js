@@ -108,7 +108,6 @@
       return;
     }
     if (sel._zonPopulated) return;
-    sel._zonPopulated = true;
     const cur = (Zotero.Prefs.get(PREFIX + "defaultNoteTemplate", true) || "note");
     // The default note template can be ANY template — a whole-note scaffold OR a
     // per-annotation/field template (creating from one yields a note that's just
@@ -117,15 +116,38 @@
     // reserved docs files.
     const RESERVED = new Set(["templates", "readme"]);
     const names = new Set(["note", "list", "quote", "callout", "compact", cur]);
+    // Primary: ask the plugin (it loaded the folder in the main-window scope where
+    // IOUtils works). This avoids the prefs-scope IO race that left the dropdown
+    // stuck on built-ins-only until a Zotero restart.
+    let gotFolder = false;
     try {
-      const dir = Zotero.Prefs.get(PREFIX + "templatesDir", true) || "";
-      if (dir && _io && _pu) {
-        for (const p of await _io.getChildren(dir)) {
-          const m = _pu.filename(p).match(/^(.+)\.(md|njk|txt)$/i);
-          if (m && !RESERVED.has(m[1].toLowerCase())) names.add(m[1]);
-        }
+      const ZON = Zotero.ZON;
+      if (ZON && ZON.prefsTemplateNames) {
+        try { await ZON.loadTemplates(); } catch (e) {}
+        for (const n of ZON.prefsTemplateNames()) names.add(n);
+        gotFolder = true;
       }
     } catch (e) {}
+    // Fallback: enumerate the folder directly (older path; only if IO is available).
+    if (!gotFolder) {
+      try {
+        const dir = Zotero.Prefs.get(PREFIX + "templatesDir", true) || "";
+        if (dir && _io && _pu) {
+          for (const p of await _io.getChildren(dir)) {
+            const m = _pu.filename(p).match(/^(.+)\.(md|njk|txt)$/i);
+            if (m && !RESERVED.has(m[1].toLowerCase())) names.add(m[1]);
+          }
+          gotFolder = true;
+        }
+      } catch (e) {}
+    }
+    // Don't lock the dropdown in until we actually have the folder's templates —
+    // otherwise an early run (plugin not ready yet) would freeze it on built-ins.
+    if (!gotFolder && (tries || 0) < 40) {
+      window.setTimeout(() => populateDefaultNote((tries || 0) + 1), 50);
+      return;
+    }
+    sel._zonPopulated = true;
     sel.textContent = "";
     for (const n of [...names].sort()) {
       const o = document.createElementNS("http://www.w3.org/1999/xhtml", "option");

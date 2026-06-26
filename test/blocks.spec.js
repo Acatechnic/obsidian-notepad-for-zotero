@@ -103,6 +103,49 @@ describe("renderBlockBody filtering + format", () => {
   });
 });
 
+describe("annotations block filtered by tag", () => {
+  const TAGGED = [
+    { key: "A", type: "highlight", attachmentKey: "PDF", pageLabel: "1", pageIndex: 0, sortIndex: "1", annotatedText: "a method point", colourName: "yellow", tags: ["method"] },
+    { key: "B", type: "highlight", attachmentKey: "PDF", pageLabel: "2", pageIndex: 1, sortIndex: "2", annotatedText: "a finding point", colourName: "blue", tags: ["finding"] },
+    { key: "C", type: "highlight", attachmentKey: "PDF", pageLabel: "3", pageIndex: 2, sortIndex: "3", annotatedText: "an untagged point", colourName: "yellow", tags: [] },
+  ];
+
+  it("keeps only highlights carrying the named tag", () => {
+    const body = renderBlockBody({ colour: "all", tag: "method", format: "list" }, TAGGED, {});
+    expect(body).toContain("a method point");
+    expect(body).not.toContain("a finding point");
+    expect(body).not.toContain("an untagged point");
+  });
+
+  it("supports OR across a comma list of tags", () => {
+    const body = renderBlockBody({ colour: "all", tag: "method,finding", format: "list" }, TAGGED, {});
+    expect(body).toContain("a method point");
+    expect(body).toContain("a finding point");
+    expect(body).not.toContain("an untagged point");
+  });
+
+  it("combines with the colour filter (AND across filters, OR within tags)", () => {
+    const body = renderBlockBody({ colour: "yellow", tag: "method", format: "list" }, TAGGED, {});
+    expect(body).toContain("a method point");      // yellow AND method
+    expect(body).not.toContain("a finding point"); // finding is blue
+  });
+
+  it("tag=all (or unset) keeps everything", () => {
+    const all = renderBlockBody({ colour: "all", tag: "all", format: "list" }, TAGGED, {});
+    expect(all.match(/- /g).length).toBe(3);
+  });
+
+  it("round-trips a tag= block through makeBlock + syncBlocks idempotently", () => {
+    const blk = makeBlock({ kind: "annotations", colour: "all", tag: "method", sync: "on", format: "list" }, TAGGED, {});
+    expect(blk).toContain("tag=method"); // serialised into the marker
+    const note = `# N\n\n${blk}\n`;
+    const once = syncBlocks(note, TAGGED, {});
+    expect(once).toContain("a method point");
+    expect(once).not.toContain("a finding point");
+    expect(syncBlocks(once, TAGGED, {})).toBe(once); // idempotent
+  });
+});
+
 describe("syncBlocks", () => {
   const note = `---
 citekey: "x"

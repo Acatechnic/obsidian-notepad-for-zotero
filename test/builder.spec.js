@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   previewTemplate, cleanPreview, BUILDER_SCAFFOLD, BUILDER_SNIPPETS,
   BLOCK_VARIABLES, ITEM_VARIABLES, SAMPLE_ITEM, SAMPLE_ANNOTATIONS,
+  buildNoteTemplate, buildFormatTemplate, STARTER_NOTE, STARTER_FORMAT,
+  FORMAT_STYLES, NOTE_FIELDS,
 } from "../src/builder.js";
 import { templateKind } from "../src/templates.js";
 
@@ -117,5 +119,85 @@ describe("palettes + scaffold are well-formed", () => {
       const out = previewTemplate(s.text, ctx);
       expect(out.raw, id).toContain("Coproduction reshapes");
     }
+  });
+});
+
+describe("buildNoteTemplate (compose → whole-note template)", () => {
+  it("is a valid whole-note template that renders against item data", () => {
+    const tpl = buildNoteTemplate({ fields: ["title", "year", "authors", "tags"], notes: true, highlights: true, highlightFormat: "quote" });
+    expect(templateKind(tpl)).toBe("document"); // frontmatter detected (closing --- on its own line)
+    const out = previewTemplate(tpl, ctx);
+    expect(out.error).toBeFalsy();
+    expect(out.raw).toContain('Title: "A Worked Example of Coproduction in Practice"');
+    expect(out.raw).toContain('Year: "2023"');
+    expect(out.raw).toContain('"Doe, Jane"');        // authors loop
+    expect(out.raw).toContain("## Notes");
+    expect(out.raw).toContain("## Highlights");
+    expect(out.raw).toContain("Coproduction reshapes"); // single all-colour block filled
+  });
+
+  it("only includes the frontmatter fields you ticked", () => {
+    const tpl = buildNoteTemplate({ fields: ["title"], highlights: true });
+    expect(tpl).toContain('Title: "{{title}}"');
+    expect(tpl).not.toContain("Journal:");
+    expect(tpl).not.toContain("Authors:");
+  });
+
+  it("routes by colour when asked, with one block per chosen colour", () => {
+    const tpl = buildNoteTemplate({ fields: ["title"], highlights: true, byColour: true, colours: ["yellow", "blue"], highlightFormat: "quote" });
+    expect(tpl).toContain('highlights(colour="yellow"');
+    expect(tpl).toContain('highlights(colour="blue"');
+    const out = previewTemplate(tpl, ctx);
+    expect(out.error).toBeFalsy();
+    expect(out.raw).toContain("Coproduction reshapes");        // yellow
+    expect(out.raw).toContain("a clean, quotable sentence");   // blue
+  });
+
+  it("adds the openPdf / citation / abstract body blocks when ticked", () => {
+    const tpl = buildNoteTemplate({ fields: ["title"], openPdf: true, citation: true, abstract: true, highlights: false });
+    const out = previewTemplate(tpl, ctx);
+    expect(out.raw).toContain("[Open PDF in Zotero](zotero://open-pdf/library/items/SAMPLEPDF)");
+    expect(out.raw).toContain("Doe J and Smith A (2023)"); // bibliography
+    expect(out.raw).toContain("A short sample abstract");
+  });
+});
+
+describe("buildFormatTemplate (compose → per-highlight body)", () => {
+  it("each style renders the highlight text without error", () => {
+    for (const s of FORMAT_STYLES) {
+      const tpl = buildFormatTemplate({ style: s.id, parts: { page: true, comment: true, tags: true } });
+      const out = previewTemplate(tpl, ctx);
+      expect(out.error, s.id + ": " + out.raw).toBeFalsy();
+      expect(out.raw, s.id).toContain("Coproduction reshapes");
+      expect(out.raw, s.id).toContain("#finding"); // tags part on
+    }
+  });
+
+  it("drops the page link and comment when those parts are off", () => {
+    const tpl = buildFormatTemplate({ style: "list", parts: { page: false, comment: false, tags: false } });
+    expect(tpl).not.toContain("{{link}}");
+    expect(tpl).not.toContain("{{comment}}");
+    expect(tpl).toContain('"{{text}}"');
+  });
+
+  it("pins a colour via a directive when chosen", () => {
+    const tpl = buildFormatTemplate({ style: "quote", colour: "blue", parts: { page: true } });
+    expect(tpl).toMatch(/^%%! colour=blue/);
+    const out = previewTemplate(tpl, ctx);
+    expect(out.raw).toContain("a clean, quotable sentence"); // blue highlight only
+    expect(out.raw).not.toContain("Coproduction reshapes");  // yellow excluded
+  });
+});
+
+describe("starters are valid and classify correctly", () => {
+  it("STARTER_NOTE is a document template that renders", () => {
+    expect(templateKind(STARTER_NOTE)).toBe("document");
+    expect(previewTemplate(STARTER_NOTE, ctx).error).toBeFalsy();
+  });
+  it("STARTER_FORMAT is a per-highlight body that renders", () => {
+    expect(templateKind(STARTER_FORMAT)).toBe("format");
+    const out = previewTemplate(STARTER_FORMAT, ctx);
+    expect(out.error).toBeFalsy();
+    expect(out.raw).toContain("Coproduction reshapes");
   });
 });

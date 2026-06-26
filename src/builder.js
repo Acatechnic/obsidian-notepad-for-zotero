@@ -122,6 +122,115 @@ Tags:
 {{ highlights(colour="blue", format="quote") }}
 `;
 
+// ------------------------------------------------- guided "compose" generators
+//
+// These turn a few tick-box choices into a working template, so someone who
+// doesn't know Nunjucks can still produce one. The output is plain template text
+// the editor shows and previewTemplate renders — exactly what hand-authoring
+// would yield, just generated. Pure + unit-tested.
+
+// Frontmatter fields offered when composing a NOTE template. `fm` is the literal
+// YAML line(s); loop fields keep `{% for %}` / `{% endfor %}` and the value on
+// SEPARATE lines (and the generator always puts the closing `---` on its own
+// line) so templateKind sees the frontmatter — see the note.md gotcha.
+export const NOTE_FIELDS = [
+  { id: "title", label: "Title", fm: 'Title: "{{title}}"' },
+  { id: "year", label: "Year", fm: "Year: \"{{date | format('YYYY')}}\"" },
+  { id: "authors", label: "Authors", fm: 'Authors:\n{% for c in creators %}\n  - "{{c.lastName}}, {{c.firstName}}"\n{% endfor %}' },
+  { id: "journal", label: "Journal", fm: 'Journal: "{{publicationTitle}}"' },
+  { id: "itemType", label: "Item type", fm: 'Type: "{{itemType}}"' },
+  { id: "dateAdded", label: "Date added", fm: 'Added: "{{dateAdded}}"' },
+  { id: "tags", label: "Zotero tags", fm: 'Tags:\n{% for t in allTags.split(\', \') %}\n  - "{{t}}"\n{% endfor %}' },
+];
+
+// Body blocks offered for a NOTE template (each is optional).
+export const NOTE_BODY_OPTIONS = [
+  { id: "openPdf", label: "“Open PDF” link" },
+  { id: "citation", label: "Formatted citation" },
+  { id: "abstract", label: "Abstract" },
+  { id: "notes", label: "“Notes” heading (your prose)" },
+  { id: "highlights", label: "Highlights section", always: true },
+];
+
+export const FORMAT_STYLES = [
+  { id: "list", label: "List item" },
+  { id: "quote", label: "Blockquote" },
+  { id: "callout", label: "Callout" },
+];
+
+// Parts of each highlight that can be toggled in the format composer.
+export const FORMAT_PARTS = [
+  { id: "page", label: "Page link" },
+  { id: "comment", label: "Your comment" },
+  { id: "tags", label: "Highlight tags" },
+];
+
+export const COLOUR_CHOICES = ["yellow", "red", "green", "blue", "purple", "magenta", "orange", "grey"];
+
+// Generate a whole-note template from compose options.
+//   { fields:[ids], openPdf, citation, abstract, notes, highlights,
+//     byColour, colours:[names], highlightFormat }
+export function buildNoteTemplate(opts = {}) {
+  const o = opts || {};
+  const fields = o.fields || ["title", "year", "authors", "journal", "tags"];
+  const fmt = o.highlightFormat || "quote";
+  const out = [];
+  out.push("---");
+  out.push('ZoteroLink: "{{desktopURI}}"');
+  out.push('citekey: "{{citekey}}"');
+  for (const f of NOTE_FIELDS) if (fields.indexOf(f.id) !== -1) out.push(f.fm);
+  out.push("---");
+  out.push("");
+  if (o.openPdf) out.push("{% if openPdf %}[Open PDF in Zotero]({{openPdf}}){% endif %}\n");
+  if (o.citation) out.push("**Citation:** {{bibliography}}\n");
+  if (o.abstract) out.push("**Abstract:** {% if abstractNote %}{{abstractNote}}{% endif %}\n");
+  if (o.notes) { out.push("## Notes"); out.push(""); }
+  if (o.highlights !== false) {
+    out.push("## Highlights");
+    out.push("");
+    if (o.byColour && o.colours && o.colours.length) {
+      for (const c of o.colours) { out.push('{{ highlights(colour="' + c + '", format="' + fmt + '") }}'); out.push(""); }
+    } else {
+      out.push("%% zon kind=annotations colour=all sync=on format=" + fmt + " %%");
+      out.push("%% /zon %%");
+    }
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").replace(/\s+$/, "") + "\n";
+}
+
+// Generate a per-highlight FORMAT body from compose options.
+//   { style:"list"|"quote"|"callout", parts:{page,comment,tags}, colour:"" }
+export function buildFormatTemplate(opts = {}) {
+  const o = opts || {};
+  const style = FORMAT_STYLES.some((s) => s.id === o.style) ? o.style : "quote";
+  const parts = o.parts || { page: true, comment: true, tags: false };
+  const tagBit = parts.tags ? " {% for t in tags %}#{{t}} {% endfor %}" : "";
+  const out = [];
+  if (o.colour) out.push("%%! colour=" + o.colour + " sync=on %%");
+  if (style === "list") {
+    let s = "- ";
+    if (parts.page) s += "[p.{{page}}]({{link}}) ";
+    s += '"{{text}}"';
+    if (parts.comment) s += "{% if comment %} — *{{comment}}*{% endif %}";
+    s += tagBit;
+    out.push(s);
+  } else if (style === "callout") {
+    out.push("> [!quote]" + (parts.page ? " p.{{page}}" : ""));
+    out.push("> {{text}}" + tagBit);
+    if (parts.comment) out.push("> {% if comment %}\n>\n> {{comment}}{% endif %}");
+  } else {
+    out.push("> {{text}}" + tagBit);
+    if (parts.page) out.push("> — [p.{{page}}]({{link}})");
+    if (parts.comment) out.push("{% if comment %}>\n> {{comment}}{% endif %}");
+  }
+  return out.join("\n");
+}
+
+// Clean per-type starting points (simpler than the full BUILDER_SCAFFOLD), used
+// when you pick a type but don't run the composer.
+export const STARTER_NOTE = buildNoteTemplate({ fields: ["title", "year", "authors", "journal", "tags"], notes: true, highlights: true, highlightFormat: "quote" });
+export const STARTER_FORMAT = buildFormatTemplate({ style: "quote", parts: { page: true, comment: true, tags: false } });
+
 // ---------------------------------------------------------------- preview
 
 // Strip `%% … %%` Obsidian comments (block markers + ann: anchors) and collapse

@@ -218,6 +218,26 @@ export function mergeNote(existingMd, freshMd, opts = {}) {
   return assembleNote(frontmatter, fresh.preamble, outSections);
 }
 
+// Frontmatter-only refresh — the correct model for Update on a free-form note.
+//
+// The note body is the USER's: free prose, headings (or none), and `%% zon %%`
+// blocks anywhere. Only the blocks sync (via syncBlocks), and nothing else in the
+// body is ever touched. This refreshes ONLY the YAML frontmatter (Zotero-owned
+// keys re-rendered, user-owned + unknown keys preserved) and returns the body
+// byte-for-byte. If the note has no frontmatter, it's returned unchanged — we
+// never impose structure the user didn't ask for.
+const FM_BLOCK = /^(---\r?\n)([\s\S]*?)(\r?\n---\r?\n?)/;
+
+export function refreshFrontmatter(existingMd, freshMd, userOwnedKeys = []) {
+  const md = String(existingMd == null ? "" : existingMd);
+  const em = md.match(FM_BLOCK);
+  if (!em) return md; // no frontmatter to refresh — leave the note exactly as-is
+  const fm = String(freshMd == null ? "" : freshMd).match(FM_BLOCK);
+  const mergedFM = mergeFrontmatter(em[2], fm ? fm[2] : null, userOwnedKeys);
+  // em.index is 0 (anchored); everything after the frontmatter block is verbatim.
+  return em[1] + mergedFM + em[3] + md.slice(em[0].length);
+}
+
 // Reassemble a note from its parts with canonical spacing.
 function assembleNote(frontmatter, preamble, sections) {
   const parts = [];
