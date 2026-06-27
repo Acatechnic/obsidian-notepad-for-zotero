@@ -17,7 +17,28 @@ import {
   history,
   historyKeymap,
   indentWithTab,
+  cursorCharLeft, selectCharLeft,
+  cursorCharRight, selectCharRight,
+  cursorLineUp, selectLineUp,
+  cursorLineDown, selectLineDown,
+  cursorLineBoundaryBackward, selectLineBoundaryBackward,
+  cursorLineBoundaryForward, selectLineBoundaryForward,
+  cursorPageUp, selectPageUp,
+  cursorPageDown, selectPageDown,
 } from "@codemirror/commands";
+
+// Bare caret-navigation keys → CM's own [move, shift-extend] commands. Used by the
+// keydown guard in create() — see the comment there for why it's needed.
+const NAV_COMMANDS = {
+  ArrowLeft: [cursorCharLeft, selectCharLeft],
+  ArrowRight: [cursorCharRight, selectCharRight],
+  ArrowUp: [cursorLineUp, selectLineUp],
+  ArrowDown: [cursorLineDown, selectLineDown],
+  Home: [cursorLineBoundaryBackward, selectLineBoundaryBackward],
+  End: [cursorLineBoundaryForward, selectLineBoundaryForward],
+  PageUp: [cursorPageUp, selectPageUp],
+  PageDown: [cursorPageDown, selectPageDown],
+};
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { yamlFrontmatter } from "@codemirror/lang-yaml";
 import { findMarkerRanges, rangeRevealed } from "../src/markers.js";
@@ -399,6 +420,52 @@ export function create({ parent, doc, onChange, onCursor, editable = true, dark 
   });
 
   const view = new EditorView({ state, parent, root });
+
+  // Arrow-key fix (the Template Builder bug). Diagnosed live: a bare arrow keydown
+  // DOES reach the focused editor, but in the builder's overlay iframe CodeMirror
+  // doesn't claim it (no preventDefault), so the browser runs its default and moves
+  // FOCUS to the next focusable control (a header checkbox) instead of moving the
+  // caret — arrows looked dead. (Typing and Cmd-shortcuts were unaffected: different
+  // paths.) Fix: claim the bare nav keys ourselves on the contentDOM in the capture
+  // phase — run CM's own motion command, then preventDefault (stop the focus-move)
+  // + stopPropagation. Only fires when the editor is the keydown target (it's bound
+  // to contentDOM), and only for un-modified keys (Cmd/Ctrl/Alt fall through to CM).
+  // State-based caret move (pure doc math — no layout, so it never throws). Used
+  // as a fallback because CM's own vertical-motion commands throw "f is not a
+  // function" in the builder's overlay editor (a measurement issue), which is the
+  // very reason plain arrows were dead: CM's keymap hit the same throw, never
+  // claimed the key, and the browser moved focus to the next control instead.
+  const moveCaret = (key, shift) => {
+    const s = view.state, sel = s.selection.main, doc = s.doc, head = sel.head, line = doc.lineAt(head);
+    let to = head;
+    if (key === "ArrowLeft") to = Math.max(0, head - 1);
+    else if (key === "ArrowRight") to = Math.min(doc.length, head + 1);
+    else if (key === "Home") to = line.from;
+    else if (key === "End") to = line.to;
+    else {
+      const col = head - line.from;
+      const delta = key === "ArrowUp" ? -1 : key === "ArrowDown" ? 1 : key === "PageUp" ? -10 : 10;
+      const n = Math.min(doc.lines, Math.max(1, line.number + delta));
+      const tl = doc.line(n);
+      to = Math.min(tl.from + col, tl.to);
+    }
+    const anchor = shift ? sel.anchor : to;
+    if (to === head && anchor === sel.anchor) return false;
+    view.dispatch({ selection: { anchor, head: to }, scrollIntoView: true });
+    return true;
+  };
+  const navKeydown = (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || !NAV_COMMANDS[e.key]) return;
+    // Try CM's own command first (correct visual-line motion where it works);
+    // fall back to the state-based move when it throws or no-ops. Always consume
+    // the key so the browser can't move focus off the editor.
+    let ran = false;
+    try { const c = NAV_COMMANDS[e.key]; ran = (e.shiftKey ? c[1] : c[0])(view); } catch (ce) { ran = false; }
+    if (!ran) { try { moveCaret(e.key, e.shiftKey); } catch (me) {} }
+    e.preventDefault(); e.stopPropagation();
+  };
+  try { view.contentDOM.addEventListener("keydown", navKeydown, true); view.zonNavKeydown = navKeydown; } catch (e) {}
+
   // Re-measure whenever the host changes size — pane-splitter drags, and (the
   // important one) the late initial layout of the item pane. CodeMirror's first
   // width measurement can land before the pane has its real width, which left
@@ -472,5 +539,6 @@ export function refresh(view) {
 export function destroy(view) {
   if (!view) return;
   try { if (view.zonResizeObserver) view.zonResizeObserver.disconnect(); } catch (e) {}
+  try { if (view.zonNavKeydown) view.contentDOM.removeEventListener("keydown", view.zonNavKeydown, true); } catch (e) {}
   view.destroy();
 }

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Template Builder: arrow keys now move the caret.** In the builder's editor,
+  pressing the arrow keys (and Home/End/PageUp/PageDown) did nothing — the caret
+  wouldn't move (typing and shortcuts worked). The editor now handles caret
+  navigation itself so it works reliably in the builder window.
+
 ### Added
 - **Template Builder: "Comment first" for composed blocks.** In the annotation
   block's Compose mode you can now lead with **your comment** and put the quote
