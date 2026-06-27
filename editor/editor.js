@@ -17,28 +17,7 @@ import {
   history,
   historyKeymap,
   indentWithTab,
-  cursorCharLeft, selectCharLeft,
-  cursorCharRight, selectCharRight,
-  cursorLineUp, selectLineUp,
-  cursorLineDown, selectLineDown,
-  cursorLineBoundaryBackward, selectLineBoundaryBackward,
-  cursorLineBoundaryForward, selectLineBoundaryForward,
-  cursorPageUp, selectPageUp,
-  cursorPageDown, selectPageDown,
 } from "@codemirror/commands";
-
-// Un-modified caret-navigation keys, mapped to CM's own [move, extend-selection]
-// commands. Used by the capture-phase guard below — see the comment in create().
-const NAV_COMMANDS = {
-  ArrowLeft: [cursorCharLeft, selectCharLeft],
-  ArrowRight: [cursorCharRight, selectCharRight],
-  ArrowUp: [cursorLineUp, selectLineUp],
-  ArrowDown: [cursorLineDown, selectLineDown],
-  Home: [cursorLineBoundaryBackward, selectLineBoundaryBackward],
-  End: [cursorLineBoundaryForward, selectLineBoundaryForward],
-  PageUp: [cursorPageUp, selectPageUp],
-  PageDown: [cursorPageDown, selectPageDown],
-};
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { yamlFrontmatter } from "@codemirror/lang-yaml";
 import { findMarkerRanges, rangeRevealed } from "../src/markers.js";
@@ -420,25 +399,6 @@ export function create({ parent, doc, onChange, onCursor, editable = true, dark 
   });
 
   const view = new EditorView({ state, parent, root });
-
-  // Bare arrow-key fix (Template Builder). When the editor lives in the builder's
-  // full-window OVERLAY iframe, Zotero's chrome swallows un-modified caret keys
-  // (Arrows/Home/End/PageUp/Down) before CodeMirror's own keymap runs — so the
-  // caret won't move, even though typing, clicking and Cmd-shortcuts all work
-  // (those go through different event paths). The in-pane note editor is immune,
-  // so this only bites the builder; the guard is harmless there. We intercept the
-  // keydown in the CAPTURE phase on the editor's document, run CM's OWN motion
-  // command, and stop the event reaching Zotero. Only when THIS view is focused
-  // and no Cmd/Ctrl/Alt is held (those combos already reach CM and are left alone).
-  const navDoc = view.contentDOM.ownerDocument;
-  const navCapture = (e) => {
-    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
-    const cmds = NAV_COMMANDS[e.key];
-    if (!cmds || !view.hasFocus) return;
-    if ((e.shiftKey ? cmds[1] : cmds[0])(view)) { e.preventDefault(); e.stopPropagation(); }
-  };
-  try { navDoc.addEventListener("keydown", navCapture, true); view.zonNavCapture = { doc: navDoc, fn: navCapture }; } catch (e) {}
-
   // Re-measure whenever the host changes size — pane-splitter drags, and (the
   // important one) the late initial layout of the item pane. CodeMirror's first
   // width measurement can land before the pane has its real width, which left
@@ -512,6 +472,5 @@ export function refresh(view) {
 export function destroy(view) {
   if (!view) return;
   try { if (view.zonResizeObserver) view.zonResizeObserver.disconnect(); } catch (e) {}
-  try { if (view.zonNavCapture) view.zonNavCapture.doc.removeEventListener("keydown", view.zonNavCapture.fn, true); } catch (e) {}
   view.destroy();
 }
