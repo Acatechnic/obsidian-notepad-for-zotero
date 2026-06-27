@@ -1397,10 +1397,11 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     // "⋯ More" (Sync Metadata / Migrate / Push tags) is appended only when
     // experimental features are enabled in Settings — keeps the row uncluttered.
     let row2 = h("div", "zon-row zon-row-actions"); row2.append(refreshBtn, openBtn, reloadBtn);
-    // The Template Builder is still in development — gate it behind the
-    // experimental-features toggle (Settings) so it's hidden for normal users but
-    // stays reachable for ongoing testing. Move it out of this `if` to ship it.
-    if (this.experimentalEnabled()) row2.append(builderBtn, moreWrap);
+    // The Template Builder now ships for everyone. The "⋯ More" popover (Sync
+    // Metadata / Migrate / Push tags) stays behind the experimental toggle while
+    // those are still being reworked.
+    row2.append(builderBtn);
+    if (this.experimentalEnabled()) row2.append(moreWrap);
     builderBtn.addEventListener("click", () => { try { this.openTemplateBuilder(win, rec); } catch (e) { this.log("openTemplateBuilder failed: " + e); } });
     let row4 = h("div", "zon-row zon-row-view"); row4.append(readLabel, frontLabel, markersLabel);
     toolbar.append(row1, row2, row4, status);
@@ -1438,9 +1439,8 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     let rescanBtn = h("button"); rescanBtn.textContent = this.t("btn.rescan"); rescanBtn.title = this.t("tip.rescan");
     let buildNoteBtn = h("button"); buildNoteBtn.textContent = this.t("btn.buildNote"); buildNoteBtn.title = this.t("tip.buildNote");
     createRow.append(noteTplSel, createBtn, rescanBtn);
-    // The Template Builder is experimental — offer "Build a note…" here only when
-    // it's enabled (matches the toolbar button's gating).
-    if (this.experimentalEnabled()) createRow.append(buildNoteBtn);
+    // "Build a note…" opens the (now-shipped) Template Builder from the empty state.
+    createRow.append(buildNoteBtn);
     banner.append(bannerText, createRow);
 
     // First-run / not-configured empty state. Shown (instead of the editor +

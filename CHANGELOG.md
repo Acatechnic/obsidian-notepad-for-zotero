@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   navigation itself so it works reliably in the builder window.
 
 ### Added
+- **The Template Builder is now available to everyone** (previously behind the
+  experimental-features toggle). Open it from the **Template Builder…** button in
+  an item's note actions, or **Build a note…** from the empty state — a dedicated
+  window to compose and edit note & highlight templates with a live preview.
 - **Template Builder: "Comment first" for composed blocks.** In the annotation
   block's Compose mode you can now lead with **your comment** and put the quote
   underneath as support (works for the list, blockquote and callout styles). It
