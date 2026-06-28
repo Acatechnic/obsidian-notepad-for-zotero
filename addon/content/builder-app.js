@@ -60,7 +60,7 @@
     header.append(closeX);
 
     // One-line orientation for first-timers.
-    var help = el("div", "b-help", "The panel on the left offers pieces for wherever your cursor is. The right shows a live preview. When it looks right, use Create / Insert / Save below.");
+    var help = el("div", "b-help", "The panel on the left offers pieces for wherever your cursor is. The right shows a live preview. When it looks right, use the buttons below to create / save the note or save a template.");
 
     // ---- body: palette | editor | preview -----------------------------------
     var body = el("div", "b-body");
@@ -88,21 +88,24 @@
     var defaultLab = el("label", "b-toggle"); var defaultChk = doc.createElement("input"); defaultChk.type = "checkbox";
     defaultLab.title = "Also make this the template Create/Build uses by default";
     defaultLab.append(defaultChk, el("span", null, "default"));
-    // No note yet → "Create note"; an open note → "Insert into note".
+    // No note yet → "Create note"; an open note → "Save to note".
     var createBtn = opts.canCreate ? el("button", "b-btn b-primary", "Create note") : null;
-    var insertBtn = opts.canInsert ? el("button", "b-btn" + (opts.canCreate ? "" : " b-primary"), "Insert into note") : null;
+    var saveNoteBtn = opts.canSaveNote ? el("button", "b-btn" + (opts.canCreate ? "" : " b-primary"), "Save to note") : null;
     var closeBtn = el("button", "b-btn", "Close");
     var status = el("span", "b-status");
     footer.append(el("span", "b-name-label", "Start:"), startSel, el("span", "b-name-label", "Save as:"), nameInput, saveBtn, defaultLab);
     if (createBtn) footer.append(createBtn);
-    if (insertBtn) footer.append(insertBtn);
+    if (saveNoteBtn) footer.append(saveNoteBtn);
     footer.append(closeBtn, status);
 
     root.append(header, help, body, footer);
 
     // ---- editor -------------------------------------------------------------
+    // Seed with what the plugin handed us: the existing note (edit-in-place) or
+    // this item's default note template; else the generic starter scaffold.
+    var initialDoc = (typeof opts.initialDoc === "string" && opts.initialDoc.length) ? opts.initialDoc : Core.STARTER_NOTE;
     var view = Ed.create({
-      parent: editorHost, doc: Core.STARTER_NOTE, dark: dark,
+      parent: editorHost, doc: initialDoc, dark: dark,
       readMode: false, showMarkers: true, showFrontmatter: true,
       onChange: function () { schedulePreview(); renderPalette(); },
       onCursor: function () { renderPalette(); },
@@ -518,12 +521,14 @@
     // ---- actions ------------------------------------------------------------
     function flash(msg, isErr) { status.textContent = msg; status.className = "b-status" + (isErr ? " b-err" : ""); }
     function doClose() { try { Ed.destroy && Ed.destroy(view); } catch (e) {} if (bridge.close) bridge.close(); }
-    if (insertBtn) insertBtn.addEventListener("click", function () {
+    // Save the edited note back. We pass the editor text AS-IS (it's the note's own
+    // content, loaded for editing) — the plugin re-syncs its %% zon %% blocks on
+    // write, so blocks you added or reconfigured fill in.
+    if (saveNoteBtn) saveNoteBtn.addEventListener("click", function () {
       var text = ""; try { text = Ed.getDoc(view) || ""; } catch (e) {}
-      var r = Core.previewTemplate(text, ctx);
-      if (r.error) { flash("Fix the template error first", true); return; }
-      if (!bridge.insert) return;
-      Promise.resolve(bridge.insert(r.raw)).then(function () { flash("Inserted into the note"); }, function (e) { flash("Insert failed: " + e, true); });
+      if (!bridge.saveNote) return;
+      flash("Saving…");
+      Promise.resolve(bridge.saveNote(text)).then(function () { flash("Saved to note ✓"); }, function (e) { flash("Save failed: " + e, true); });
     });
     if (createBtn) createBtn.addEventListener("click", function () {
       var text = ""; try { text = Ed.getDoc(view) || ""; } catch (e) {}

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The Template Builder opens on your note.** It now starts from the right
+  content for the selected item instead of a generic scaffold: if the item has
+  **no note yet**, the editor begins with **your default note template** (tweak
+  it, then Create note); if a **note already exists**, it **loads that note** so
+  you can edit it with the builder's tools and **Save to note** writes it back
+  (re-syncing its `%% zon %%` blocks). "Save to folder" still turns whatever's in
+  the editor into a reusable template.
+
 ## [1.0.0-beta.16] — 2026-06-27
 
 ### Fixed

@@ -2126,6 +2126,32 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     return r.path;
   },
 
+  // Bridge OUT (4): write the builder's edited text back to THIS item's existing
+  // note (the "edit the note in the builder" path). The builder loaded the note's
+  // current content; on save we sync its `%% zon %%` blocks from the item's current
+  // annotations (so blocks the user added/reconfigured fill in, exactly like
+  // Update), keep the durable ZoteroLink, write it, and re-render the pane.
+  async builderSaveNote(rec, win, text) {
+    if (!rec || !rec.path || !rec.item) throw new Error("no open note to save to");
+    if (!win.ZONCore) await this.injectCore(win);
+    let item = rec.item;
+    let md = String(text == null ? "" : text);
+    try {
+      let citekey = this.getCitekey(item);
+      let bibliography = await this.getBibliography(item);
+      let data = win.ZONCore.buildItemData(item, { citekey, bibliography, importDate: new Date().toISOString(), pdfAttachmentKey: this.primaryPdfKey(item) });
+      let anns = this.gatherAnnotations(item, win);
+      let attachmentFolder = this.resolveAttachmentFolder(md, win);
+      try { await this.exportAnnotationImages(anns, citekey, attachmentFolder, win); } catch (e) {}
+      md = win.ZONCore.syncBlocks(md, anns, { citekey, formats: this.formatMap(win), itemData: data, attachmentFolder });
+      try { md = win.ZONCore.ensureZoteroLink(md, win.ZONCore.zoteroSelectURI(item)); } catch (e) {}
+    } catch (e) { this.log("builderSaveNote sync failed: " + e); }
+    await this.safeWrite(rec.path, md);
+    try { rec.diskMtime = await this.noteMtime(rec.path); } catch (e) {}
+    try { if (rec.wrap) await this.renderInto(rec.wrap, item); } catch (e) {}
+    return rec.path;
+  },
+
   // Create @<citekey>.md from the chosen template (any template — a whole-note
   // scaffold or just an annotations block), link it to this item, and open it.
   async createNote(rec, templateName) {
@@ -2835,22 +2861,26 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
 
     let self = this;
     let bridge = {
-      insert: (text) => self.builderInsert(rec, win, text),
       save: (name, text, setDefault) => self.builderSaveTemplate(win, name, text, setDefault),
       createNote: (text) => self.builderCreateNote(rec, win, text),
+      saveNote: (text) => self.builderSaveNote(rec, win, text),
       close: () => self.closeTemplateBuilder(win),
     };
-    // No linked note yet → the builder offers "Create note"; an open note editor →
-    // it offers "Insert into note".
-    let canInsert = !!(rec && rec.view && rec.path);
-    let canCreate = !canInsert && !!item;
+    // No linked note yet → the builder offers "Create note" and starts from this
+    // item's DEFAULT note template. An open note → it LOADS that note to edit in
+    // place, and offers "Save to note".
+    let canSaveNote = !!(rec && rec.view && rec.path);
+    let canCreate = !canSaveNote && !!item;
+    let initialDoc = null;
+    if (canSaveNote) { try { initialDoc = rec.lib && rec.view ? rec.lib.getDoc(rec.view) : null; } catch (e) {} }
+    else if (canCreate) { try { initialDoc = await this.resolveNoteScaffoldText(); } catch (e) {} }
     // Poll the (srcdoc-swapped) contentWindow for the app entry + both bundles,
     // then start it — same robustness trick the note editor iframe uses.
     let tries = 0;
     let waitForApp = function () {
       let fw = iframe.contentWindow;
       if (fw && fw.startBuilder && fw.ZONCore && fw.ZOSEditorLib) {
-        try { fw.startBuilder({ previewCtx: ctx, bridge, dark, templates, formatNames, canInsert, canCreate }); }
+        try { fw.startBuilder({ previewCtx: ctx, bridge, dark, templates, formatNames, canCreate, canSaveNote, initialDoc }); }
         catch (e) { self.log("startBuilder failed: " + e); }
         return;
       }
@@ -2949,13 +2979,6 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
       + '<script src="' + edURL + '"></scr' + 'ipt>'
       + '<script src="' + appURL + '"></scr' + 'ipt>'
       + '</body></html>';
-  },
-
-  // Bridge OUT (1): insert the builder's rendered output (a live %% zon %% block,
-  // or a rendered note) into the active note editor at the cursor.
-  builderInsert(rec, win, text) {
-    if (!rec || !rec.view || !rec.lib) throw new Error("no active note editor");
-    rec.lib.insertAtCursor(rec.view, "\n" + String(text || "").trim() + "\n");
   },
 
   // Bridge OUT (2): write the builder's template SOURCE to the Templates folder
