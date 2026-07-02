@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.17] — 2026-07-02
+
 ### Fixed
 - **Data loss when editing a note while auto-syncing highlights.** With Auto-sync
   on, adding a highlight while you were editing the note could drop the prose you'd
