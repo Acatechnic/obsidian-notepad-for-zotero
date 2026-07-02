@@ -523,9 +523,26 @@ export function setCursor(view, pos) {
 
 // Replace the whole buffer (used when switching to a different item's note).
 // Preserves nothing — caller is responsible for having saved prior edits.
-export function setDoc(view, text) {
+// Pass `{ preserveView: true }` to keep the scroll position and (clamped) caret
+// across the replace — used by auto-sync so pulling in a new highlight doesn't
+// yank the viewport to the top while you're reading/editing further down.
+export function setDoc(view, text, opts = {}) {
+  const t = text || "";
+  if (opts.preserveView && view.scrollDOM) {
+    const scrollTop = view.scrollDOM.scrollTop;
+    const sel = view.state.selection.main;
+    const anchor = Math.min(sel.anchor, t.length);
+    const head = Math.min(sel.head, t.length);
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: t },
+      selection: { anchor, head },
+      scrollIntoView: false,
+    });
+    try { view.scrollDOM.scrollTop = scrollTop; } catch (e) {}
+    return;
+  }
   view.dispatch({
-    changes: { from: 0, to: view.state.doc.length, insert: text || "" },
+    changes: { from: 0, to: view.state.doc.length, insert: t },
   });
 }
 

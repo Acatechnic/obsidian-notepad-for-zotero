@@ -1684,7 +1684,10 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     let win = rec.host.ownerDocument.defaultView;
     this.setStatus(rec, this.t("status.editing"));
     if (rec.timer) win.clearTimeout(rec.timer);
-    rec.timer = win.setTimeout(() => { this.save(rec); }, 700);
+    // Clear the flag when it fires so `rec.timer` means "an unsaved edit is
+    // pending" accurately — the conflict/auto-sync checks gate on it, and a stale
+    // (already-fired) timer id made them misfire.
+    rec.timer = win.setTimeout(() => { rec.timer = null; this.save(rec); }, 700);
   },
 
   // --- data safety: atomic writes + external-change (conflict) detection -----
@@ -1694,7 +1697,10 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
   // made outside Zotero; the user reconciles via the conflict bar instead.
 
   async safeWrite(path, text) {
-    await IOUtils.writeUTF8(path, text, { tmpPath: path + ".zon.tmp" });
+    // Unique temp path per write: a fixed `<note>.zon.tmp` was shared by every
+    // writer, so two concurrent writes could corrupt each other's temp file.
+    this._wseq = (this._wseq || 0) + 1;
+    await IOUtils.writeUTF8(path, text, { tmpPath: path + "." + this._wseq + ".zon.tmp" });
   },
 
   async noteMtime(path) {
@@ -1715,19 +1721,39 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
   },
   hideConflict(rec) { try { if (rec.conflict) rec.conflict.style.display = "none"; } catch (e) {} },
 
+  // Serialize every disk write to a single note through a per-rec promise chain,
+  // so the debounced editor autosave and the annotation auto-sync (and any other
+  // write path) can never interleave their read-modify-write and clobber each
+  // other. This was the root of the "reload erased my notes" data loss.
+  withNoteLock(rec, fn) {
+    let prev = rec._noteLock || Promise.resolve();
+    let run = prev.then(() => fn(), () => fn());
+    rec._noteLock = run.then(() => {}, () => {}); // the chain never rejects
+    return run;
+  },
+
+  // Write the editor's current text to disk + refresh the mtime baseline. No lock
+  // and no conflict check — callers hold the lock and have decided it's safe.
+  async _persistEditor(rec) {
+    if (!rec.path || !rec.lib || !rec.view) return false;
+    await this.safeWrite(rec.path, rec.lib.getDoc(rec.view));
+    rec.diskMtime = await this.noteMtime(rec.path);
+    return true;
+  },
+
   // Editor autosave. Refuses to overwrite a note that changed on disk since we
   // last saw it (unless forced from the conflict bar's "Overwrite mine").
   async save(rec, opts = {}) {
     if (!rec.path || !rec.lib || !rec.view) return false;
-    if (!opts.force && await this.externallyChanged(rec)) { this.showConflict(rec); return false; }
-    let text = rec.lib.getDoc(rec.view);
-    try {
-      await this.safeWrite(rec.path, text);
-      rec.diskMtime = await this.noteMtime(rec.path);
-      this.hideConflict(rec);
-      this.setStatus(rec, this.t("status.saved"));
-      return true;
-    } catch (e) { this.setStatus(rec, this.t("err.save") + e); this.log("save failed: " + e); return false; }
+    return this.withNoteLock(rec, async () => {
+      if (!opts.force && await this.externallyChanged(rec)) { this.showConflict(rec); return false; }
+      try {
+        await this._persistEditor(rec);
+        this.hideConflict(rec);
+        this.setStatus(rec, this.t("status.saved"));
+        return true;
+      } catch (e) { this.setStatus(rec, this.t("err.save") + e); this.log("save failed: " + e); return false; }
+    });
   },
 
   async flush(rec) {
@@ -2543,42 +2569,57 @@ Full reference: https://github.com/Acatechnic/obsidian-notepad-for-zotero/blob/m
     if (!item || !rec.path) return;
     let win = rec.host.ownerDocument.defaultView;
     if (!win.ZONCore) await this.injectCore(win);
-    // Genuine conflict only — unsaved editor edits AND an external change. The
-    // sync itself reads fresh from disk and merges, so an external edit with no
-    // pending editor edit is preserved automatically (no need to block).
-    if (rec.timer && await this.externallyChanged(rec)) { this.showConflict(rec); return; }
-    await this.flush(rec);
-    await this.loadTemplates();
-    let existing = "";
-    try { existing = await IOUtils.readUTF8(rec.path); } catch (e) { return; }
-    let anns = this.gatherAnnotations(item, win);
-    let folder = this.resolveAttachmentFolder(existing, win);
-    try {
-      let copied = await this.exportAnnotationImages(anns, this.getCitekey(item), folder, win);
-      // A resized/moved image keeps the same key → same embed text, so the note
-      // body won't change below; but the PNG did. Bump the token + refresh the
-      // live view's images IN PLACE (no remount → no caret disruption).
-      if (copied) {
-        this._imgEpoch = (this._imgEpoch || 0) + 1;
-        try { if (rec.lib && rec.view && rec.lib.setImageEpoch) rec.lib.setImageEpoch(rec.view, this._imgEpoch); } catch (e) {}
+    // Everything below runs under the per-rec write lock, so the debounced
+    // autosave can't interleave with this read-modify-write (that race is what
+    // dropped freshly-typed prose and tripped the false "changed outside Zotero").
+    return this.withNoteLock(rec, async () => {
+      // Genuine conflict only — unsaved editor edits AND an external (Obsidian)
+      // change. Surface it; don't clobber either side.
+      if (rec.timer && await this.externallyChanged(rec)) { this.showConflict(rec); return; }
+      // Persist any pending editor edits to disk FIRST, inline (we hold the lock,
+      // so no concurrent autosave). Then the file is the source of truth and we can
+      // safely read → sync → write. clearTimeout so the pending autosave is a no-op.
+      if (rec.timer) {
+        try { win.clearTimeout(rec.timer); } catch (e) {}
+        rec.timer = null;
+        try { await this._persistEditor(rec); } catch (e) { this.log("auto-sync flush failed: " + e); }
       }
-    } catch (e) { this.log("image export failed: " + e); }
-    let updated;
-    try { updated = win.ZONCore.syncBlocks(existing, anns, this.syncOpts(win, item, { attachmentFolder: folder })); }
-    catch (e) { this.log("auto-sync syncBlocks failed: " + e); return; }
-    if (updated === existing) return; // body unchanged — image (if any) already refreshed above
-    try { await this.safeWrite(rec.path, updated); rec.diskMtime = await this.noteMtime(rec.path); }
-    catch (e) { this.setStatus(rec, this.t("err.autoSyncWrite") + e); this.log("auto-sync write failed: " + e); return; }
-    // Push the new content into the open editor. Guard with rec.loading so the
-    // programmatic setDoc's onChange doesn't schedule a redundant save (which
-    // would also overwrite the status below with "Saved").
-    try {
-      if (rec.lib && rec.view) {
-        rec.loading = true;
-        try { rec.lib.setDoc(rec.view, updated); } finally { rec.loading = false; }
-      }
-    } catch (e) {}
-    this.setStatus(rec, this.t("status.autoSynced", { count: anns.length }));
+      await this.loadTemplates();
+      let existing = "";
+      try { existing = await IOUtils.readUTF8(rec.path); } catch (e) { return; }
+      let anns = this.gatherAnnotations(item, win);
+      let folder = this.resolveAttachmentFolder(existing, win);
+      try {
+        let copied = await this.exportAnnotationImages(anns, this.getCitekey(item), folder, win);
+        // A resized/moved image keeps the same key → same embed text, so the note
+        // body won't change below; but the PNG did. Bump the token + refresh the
+        // live view's images IN PLACE (no remount → no caret disruption).
+        if (copied) {
+          this._imgEpoch = (this._imgEpoch || 0) + 1;
+          try { if (rec.lib && rec.view && rec.lib.setImageEpoch) rec.lib.setImageEpoch(rec.view, this._imgEpoch); } catch (e) {}
+        }
+      } catch (e) { this.log("image export failed: " + e); }
+      let updated;
+      try { updated = win.ZONCore.syncBlocks(existing, anns, this.syncOpts(win, item, { attachmentFolder: folder })); }
+      catch (e) { this.log("auto-sync syncBlocks failed: " + e); return; }
+      if (updated === existing) return; // body unchanged — image (if any) already refreshed above
+      // Don't clobber edits the user typed DURING our awaits above: if the live
+      // editor no longer matches what we synced from, skip this round — the next
+      // autosave / annotation change picks it up from the newer content.
+      try { if (rec.lib && rec.view && rec.lib.getDoc(rec.view) !== existing) return; } catch (e) {}
+      try { await this.safeWrite(rec.path, updated); rec.diskMtime = await this.noteMtime(rec.path); }
+      catch (e) { this.setStatus(rec, this.t("err.autoSyncWrite") + e); this.log("auto-sync write failed: " + e); return; }
+      // Push the new content into the open editor, preserving scroll + caret (no
+      // jump to top). rec.loading guards the programmatic setDoc's onChange so it
+      // doesn't schedule a redundant save.
+      try {
+        if (rec.lib && rec.view) {
+          rec.loading = true;
+          try { rec.lib.setDoc(rec.view, updated, { preserveView: true }); } finally { rec.loading = false; }
+        }
+      } catch (e) {}
+      this.setStatus(rec, this.t("status.autoSynced", { count: anns.length }));
+    });
   },
 
   // Apply the "Show markers" state to every open editor (reveal/hide live) and

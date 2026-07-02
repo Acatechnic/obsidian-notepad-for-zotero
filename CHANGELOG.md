@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Data loss when editing a note while auto-syncing highlights.** With Auto-sync
+  on, adding a highlight while you were editing the note could drop the prose you'd
+  just typed, falsely report the note as "changed outside Zotero", and — on Reload
+  — load the prose-less version, erasing your writing. All writes to a note are now
+  **serialized** (the debounced autosave and the annotation auto-sync can no longer
+  interleave), auto-sync **skips rather than clobbers** edits you make mid-sync,
+  each write uses a unique temp file, and the "unsaved edits" flag is tracked
+  accurately so the conflict bar no longer misfires.
+- **Auto-sync no longer scrolls the note to the top.** Pulling in a new highlight
+  now preserves your scroll position and caret instead of jumping to the top.
+
 ### Changed
 - **The Template Builder opens on your note.** It now starts from the right
   content for the selected item instead of a generic scaffold: if the item has
